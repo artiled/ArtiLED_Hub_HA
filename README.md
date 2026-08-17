@@ -10,9 +10,11 @@ not to invite forks. See Copyright below.
 ## Features
 
 - **Config flow** — add via Settings → Devices & services → Add integration →
-  "ArtiLED Hub". Enter host + API token; validated against `/alive` and
-  `/version`. The Hub ident is the unique id, so the same Hub can't be added
-  twice.
+  "ArtiLED Hub". Enter the host and the **username and password you use to
+  sign in to the Hub** — the integration fetches the API token itself via
+  `/api/login` and stores only that; the password is never persisted. Validated
+  against `/alive` and `/version`. The Hub ident is the unique id, so the same
+  Hub can't be added twice.
 - **Lights** — one HA light entity per Hub **room**, per **zone**, and per
   **individual light**. Hue-style device model: rooms/zones are devices
   (like Hue Rooms) and every individual light is its own device (like Hue
@@ -150,7 +152,7 @@ not to invite forks. See Copyright below.
 2. Repository `https://github.com/artiled/ArtiLED_Hub_HA`, type **Integration**
 3. Install **ArtiLED Hub**, then restart Home Assistant
 4. Settings → Devices & services → **Add integration** → ArtiLED Hub
-5. Host = Hub IP, token = Hub API token (Hub UI → Settings → API)
+5. Host = Hub IP, then your Hub username and password
 
 HACS then offers updates whenever a new release is tagged — that is the whole
 reason for publishing here.
@@ -161,7 +163,7 @@ reason for publishing here.
    `/config/custom_components/artiled_hub/`
 2. Restart Home Assistant.
 3. Settings → Devices & services → **Add integration** → ArtiLED Hub.
-4. Host = Hub IP, token = Hub API token.
+4. Host = Hub IP, then your Hub username and password.
 
 ⚠ A manual install does not update itself. Use HACS unless you have a reason
 not to.

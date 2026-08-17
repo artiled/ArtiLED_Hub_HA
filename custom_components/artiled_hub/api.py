@@ -56,6 +56,41 @@ class ArtiHubClient:
             raise ArtiHubError(str(body.get("error_text") or "Hub error") if isinstance(body, dict) else "Hub error")
         return body.get("data") or {}
 
+    @staticmethod
+    async def login(
+        session: aiohttp.ClientSession, host: str, username: str, password: str
+    ) -> str:
+        """Exchange the customer's Hub login for the Hub's API token.
+
+        ⚠ The customer should never have to go and find an API token. They
+        already have a Hub username and password — the same one they use for the
+        Hub's own web interface — and /api/login turns that into the token.
+
+        ⚠ THE TOKEN IS STORED, THE PASSWORD IS NOT. What comes back is read from
+        /opt/artiled/data/token: a STABLE, Hub-wide token, not a session token.
+        So nothing ever needs the password again, and a token that later stops
+        working is a re-auth, exactly as before.
+        """
+        try:
+            resp = await session.post(
+                f"http://{host.strip()}/api/login",
+                data={"data": json.dumps({"username": username, "password": password})},
+                timeout=aiohttp.ClientTimeout(total=20),
+            )
+            body = await resp.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+            raise ArtiHubError(f"Hub unreachable: {err}") from err
+        if not isinstance(body, dict) or int(body.get("success", 0)) != 1:
+            raise ArtiHubAuthError(
+                str(body.get("error_text") or "Login failed")
+                if isinstance(body, dict)
+                else "Login failed"
+            )
+        token = (body.get("data") or {}).get("token")
+        if not token:
+            raise ArtiHubError("Hub accepted the login but returned no token")
+        return str(token)
+
     async def alive(self) -> dict[str, Any]:
         """Unauthenticated reachability probe — returns name + ident."""
         try:
