@@ -1,0 +1,365 @@
+run_scene:
+  name: Run scene
+  description: Run a Hub scene, optionally scoped to one room or zone.
+  fields:
+    hub:
+      name: Hub
+      description: >-
+        Which Hub, by name or ident. Only needed when more than one Hub is
+        configured.
+      required: false
+      example: "Main Hub"
+      selector: { text: }
+    name:
+      name: Scene
+      description: Scene name or id as known by the Hub.
+      required: true
+      example: "Christmas"
+      selector:
+        text:
+    room:
+      name: Room
+      description: Room name or id to scope the scene to.
+      required: false
+      example: "Livingroom"
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone name or id to scope the scene to.
+      required: false
+      example: "Cinewall"
+      selector:
+        text:
+
+stop_scene:
+  name: Stop scene
+  description: Stop a running Hub scene, optionally scoped to one room or zone.
+  fields:
+    hub:
+      name: Hub
+      description: >-
+        Which Hub, by name or ident. Only needed when more than one Hub is
+        configured.
+      required: false
+      example: "Main Hub"
+      selector: { text: }
+    name:
+      name: Scene
+      description: Scene name or id as known by the Hub.
+      required: true
+      example: "Christmas"
+      selector:
+        text:
+    room:
+      name: Room
+      description: Room name or id.
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone name or id.
+      required: false
+      selector:
+        text:
+
+run_mode:
+  name: Run mode
+  description: Start a Hub mode, optionally scoped to one room or zone.
+  fields:
+    hub:
+      name: Hub
+      description: >-
+        Which Hub, by name or ident. Only needed when more than one Hub is
+        configured.
+      required: false
+      example: "Main Hub"
+      selector: { text: }
+    name:
+      name: Mode
+      description: Mode name or id as known by the Hub.
+      required: true
+      example: "Fireplace"
+      selector:
+        text:
+    room:
+      name: Room
+      description: Room name or id to scope the mode to.
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone name or id to scope the mode to.
+      required: false
+      selector:
+        text:
+
+stop_mode:
+  name: Stop mode
+  description: Stop a running Hub mode, optionally scoped to one room or zone.
+  fields:
+    hub:
+      name: Hub
+      description: >-
+        Which Hub, by name or ident. Only needed when more than one Hub is
+        configured.
+      required: false
+      example: "Main Hub"
+      selector: { text: }
+    name:
+      name: Mode
+      description: Mode name or id as known by the Hub.
+      required: true
+      example: "Fireplace"
+      selector:
+        text:
+    room:
+      name: Room
+      description: Room name or id.
+      required: false
+      selector:
+        text:
+    zone:
+      name: Zone
+      description: Zone name or id.
+      required: false
+      selector:
+        text:
+
+set_color:
+  name: Set colour
+  description: >-
+    Set colour on a room, zone or light, optionally on SOME CHANNELS only.
+    Home Assistant's light.turn_on has no channel concept, so this is the only
+    way to drive one channel of a multi-channel ArtiLED light.
+  fields:
+    hub:
+      name: Hub
+      description: >-
+        Which Hub, by name or ident. Only needed when more than one Hub is
+        configured - with one, it is used automatically.
+      required: false
+      example: "Main Hub"
+      selector: { text: }
+    room:
+      name: Room
+      description: >-
+        Room ID. Give EXACTLY ONE of room, zone or light - naming two silently
+        coloured only one of them. IDs only here, not names (run_scene and
+        run_mode do take names; the Hub resolves those itself).
+      example: 15
+      selector:
+        number: { mode: box, min: 1 }
+    zone:
+      name: Zone
+      description: Zone ID. Give exactly one of room, zone or light.
+      example: 16
+      selector:
+        number: { mode: box, min: 1 }
+    light:
+      name: Light
+      description: Light ID. Give exactly one of room, zone or light.
+      example: 52
+      selector:
+        number: { mode: box, min: 1 }
+    channel:
+      name: Channel
+      description: >-
+        The Hub's digit-concat selector, NOT a count: "0" is the whole light,
+        "2" is channel 2 only, "13" is channels 1 and 3. All four channels is
+        "0" as well (the API reads 1234 as a number over 255).
+      default: "0"
+      example: "13"
+      selector: { text: }
+    rgbw:
+      name: RGBW
+      description: Four values 0-255, red green blue white.
+      example: "[255, 0, 0, 0]"
+      selector: { object: }
+    temperature:
+      name: White temperature
+      description: The Hub's white channel, 0-255 with 0 the coldest.
+      example: 128
+      selector: { number: { min: 0, max: 255 } }
+    intensity:
+      name: White intensity
+      description: The Hub's white intensity, 0-255. Defaults to 255.
+      example: 255
+      selector: { number: { min: 0, max: 255 } }
+
+add_voice_scene:
+  name: Add a scoped scene to voice
+  description: >-
+    Give one room or zone plus one Hub scene a spoken name, and create a scene
+    entity for it. Only what you add here exists - the Hub offers hundreds of
+    room/scene combinations and generating them all would flood Home Assistant
+    and the Alexa app.
+  fields:
+    hub:
+      name: Hub
+      description: >-
+        Which Hub, by name or ident. Only needed when more than one Hub is
+        configured.
+      required: false
+      example: "Main Hub"
+      selector: { text: }
+    room:
+      name: Room
+      description: Hub room id. Give either room or zone, not both.
+      required: false
+      example: 15
+      selector:
+        number:
+          mode: box
+          min: 1
+    zone:
+      name: Zone
+      description: Hub zone id. Give either room or zone, not both.
+      required: false
+      example: 16
+      selector:
+        number:
+          mode: box
+          min: 1
+    scene:
+      name: Scene
+      description: Scene name exactly as the Hub offers it for that scope.
+      required: true
+      example: "Cinema"
+      selector:
+        text:
+    name:
+      name: Spoken name
+      description: >-
+        What you will say. Stored verbatim, so "Cinema" in the Cinema does not
+        become "Cinema Cinema".
+      required: true
+      example: "Living Room Cinema"
+      selector:
+        text:
+
+remove_voice_scene:
+  name: Remove a scoped scene from voice
+  description: Delete the scene entity created for one room/zone plus scene.
+  fields:
+    hub:
+      name: Hub
+      description: >-
+        Which Hub, by name or ident. Only needed when more than one Hub is
+        configured.
+      required: false
+      example: "Main Hub"
+      selector: { text: }
+    room:
+      name: Room
+      description: Hub room id. Give either room or zone, not both.
+      required: false
+      example: 15
+      selector:
+        number:
+          mode: box
+          min: 1
+    zone:
+      name: Zone
+      description: Hub zone id. Give either room or zone, not both.
+      required: false
+      example: 16
+      selector:
+        number:
+          mode: box
+          min: 1
+    scene:
+      name: Scene
+      description: Scene name as given when it was added.
+      required: true
+      example: "Cinema"
+      selector:
+        text:
+
+add_voice_mode:
+  name: Add a scoped mode to voice
+  description: >-
+    Give one room or zone plus one Hub mode a spoken name, and create a SWITCH
+    for it. A switch rather than a scene because a mode runs until stopped, so
+    it needs an off as well as an on.
+  fields:
+    hub:
+      name: Hub
+      description: >-
+        Which Hub, by name or ident. Only needed when more than one Hub is
+        configured.
+      required: false
+      example: "Main Hub"
+      selector: { text: }
+    room:
+      name: Room
+      description: Hub room id. Give either room or zone, not both.
+      required: false
+      example: 5
+      selector:
+        number:
+          mode: box
+          min: 1
+    zone:
+      name: Zone
+      description: Hub zone id. Give either room or zone, not both.
+      required: false
+      example: 16
+      selector:
+        number:
+          mode: box
+          min: 1
+    mode:
+      name: Mode
+      description: Mode name exactly as the Hub offers it for that scope.
+      required: true
+      example: "Cinema"
+      selector:
+        text:
+    name:
+      name: Spoken name
+      description: What you will say. Stored verbatim.
+      required: true
+      example: "Cinema Mode"
+      selector:
+        text:
+
+remove_voice_mode:
+  name: Remove a scoped mode from voice
+  description: Delete the switch created for one room/zone plus mode.
+  fields:
+    hub:
+      name: Hub
+      description: >-
+        Which Hub, by name or ident. Only needed when more than one Hub is
+        configured.
+      required: false
+      example: "Main Hub"
+      selector: { text: }
+    room:
+      name: Room
+      description: Hub room id. Give either room or zone, not both.
+      required: false
+      example: 5
+      selector:
+        number:
+          mode: box
+          min: 1
+    zone:
+      name: Zone
+      description: Hub zone id. Give either room or zone, not both.
+      required: false
+      example: 16
+      selector:
+        number:
+          mode: box
+          min: 1
+    mode:
+      name: Mode
+      description: Mode name as given when it was added.
+      required: true
+      example: "Cinema"
+      selector:
+        text:

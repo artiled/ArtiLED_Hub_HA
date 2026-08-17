@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to your ArtiLED Hub",
+        "description": "Enter the Hub's IP address or hostname and its API token (Hub web UI → Settings → API).",
+        "data": {
+          "host": "Host",
+          "token": "API token"
+        }
+      },
+      "reauth_confirm": {
+        "title": "ArtiLED Hub token no longer works",
+        "description": "The Hub at {host} rejected the stored API token. Enter the current token (Hub web UI → Settings → API). Your rooms, zones, names and voice settings are kept.",
+        "data": {
+          "token": "API token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Hub. Check the host and network.",
+      "invalid_auth": "The Hub rejected the API token."
+    },
+    "abort": {
+      "already_configured": "This Hub is already configured.",
+      "reauth_successful": "The new token was accepted.",
+      "reauth_failed": "That configuration entry no longer exists.",
+      "wrong_hub": "That token belongs to a different ArtiLED Hub. Use the token for the Hub already configured here, or add the other Hub as a new integration."
+    }
+  }
+}
