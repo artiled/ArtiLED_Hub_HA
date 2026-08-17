@@ -1,4 +1,4 @@
-# ArtiLED Hub — Home Assistant integration
+# ArtiLED — Home Assistant integration
 
 Native local integration for the ArtiLED Hub. Home Assistant controls and
 observes the Hub over its local HTTP API (ArtiAPI); the Hub remains the
