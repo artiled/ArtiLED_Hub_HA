@@ -81,8 +81,11 @@ not to invite forks. See Copyright below.
     a disappearance is what triggers the reload); a full HA restart re-baselines
     to whatever the Hub reports.
 - **Dashboard that builds itself** — the integration ships its own frontend
-  module (no HACS, no manual resource, nothing for a customer to install). Point
-  a dashboard at it and the whole config is three lines:
+  module (no HACS, no manual resource, nothing for a customer to install), and
+  since 0.32.0 it **creates the ArtiLED dashboard for you** when you add the Hub
+  (a checkbox in the setup dialog, on by default). It is created once: delete it
+  and it stays deleted; *Configure* on the integration can put it back. If you
+  would rather make one by hand, the whole config is three lines:
 
   ```yaml
   strategy:

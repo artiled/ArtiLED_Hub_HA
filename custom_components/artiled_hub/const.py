@@ -4,6 +4,7 @@
 DOMAIN = "artiled_hub"
 
 CONF_TOKEN = "token"
+CONF_CREATE_DASHBOARD = "create_dashboard"   # #525 — config-flow checkbox, default on
 
 STORAGE_VERSION = 1
 

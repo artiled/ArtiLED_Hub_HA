@@ -8,10 +8,12 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ArtiHubAuthError, ArtiHubClient, ArtiHubError
-from .const import CONF_TOKEN, DOMAIN
+from .const import CONF_CREATE_DASHBOARD, CONF_TOKEN, DOMAIN
+from .dashboard import DATA_DASHBOARD_CREATED, DATA_DASHBOARD_PENDING, async_create_dashboard
 
 # ⚠ LOGIN, NOT A TOKEN. The customer has a Hub username and password already —
 # the one they use for the Hub's own web interface — and the integration turns
@@ -27,6 +29,9 @@ DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_HOST): str,
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
+        # #525 — create the ArtiLED dashboard on setup. Explicit and skippable;
+        # the Configure flow offers it again later.
+        vol.Optional(CONF_CREATE_DASHBOARD, default=True): bool,
     }
 )
 
@@ -76,7 +81,11 @@ class ArtiHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # job and is deliberately not written to the config entry.
                 return self.async_create_entry(
                     title=f"{alive.get('name', 'ArtiLED Hub')} ({version})",
-                    data={CONF_HOST: host, CONF_TOKEN: token},
+                    data={
+                        CONF_HOST: host,
+                        CONF_TOKEN: token,
+                        CONF_CREATE_DASHBOARD: bool(user_input.get(CONF_CREATE_DASHBOARD, True)),
+                    },
                 )
         return self.async_show_form(step_id="user", data_schema=DATA_SCHEMA, errors=errors)
 
@@ -136,4 +145,36 @@ class ArtiHubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=REAUTH_SCHEMA,
             errors=errors,
             description_placeholders={"host": entry.data[CONF_HOST]},
+        )
+
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
+        """Configure: create the ArtiLED dashboard again (#525)."""
+        return ArtiHubOptionsFlow(config_entry)
+
+
+class ArtiHubOptionsFlow(config_entries.OptionsFlow):
+    """One explicit action: put the ArtiLED dashboard back.
+
+    Creation on setup is once-only by design — a dashboard the customer deleted
+    stays deleted. This is the path back: tick the box, and it is created now
+    (or adopted, if one with our url path is present) and recorded again.
+    """
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self._entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        if user_input is not None:
+            if user_input.get("create_dashboard_again"):
+                data = {k: v for k, v in self._entry.data.items() if k not in (DATA_DASHBOARD_CREATED, DATA_DASHBOARD_PENDING)}
+                data[CONF_CREATE_DASHBOARD] = True
+                self.hass.config_entries.async_update_entry(self._entry, data=data)
+                await async_create_dashboard(self.hass, self._entry)
+            return self.async_create_entry(title="", data={})
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({vol.Optional("create_dashboard_again", default=False): bool}),
         )

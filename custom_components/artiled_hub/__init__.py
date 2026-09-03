@@ -25,6 +25,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
 
 from .api import ArtiHubAuthError, ArtiHubClient, ArtiHubError
+from .dashboard import async_create_dashboard
 from .const import (
     ASSISTANTS,
     CONF_TOKEN,
@@ -327,6 +328,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(coordinator.async_add_listener(_inventory_changed))
     await _pin_run_picker_ids(hass, entry, hub_ident, coordinator)
+    # #525 — the dashboard, created once, from here. Wrapped inside as well:
+    # presentation must never block control.
+    try:
+        await async_create_dashboard(hass, entry)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("ArtiLED dashboard step failed: %s", err)
     await _voice_defaults_once(hass, entry)
     await _hide_house_wide_once(hass, entry, hub_ident)
     _register_services(hass)

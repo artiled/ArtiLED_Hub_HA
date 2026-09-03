@@ -7,7 +7,11 @@
         "data": {
           "host": "Host",
           "username": "Username",
-          "password": "Password"
+          "password": "Password",
+          "create_dashboard": "Create the ArtiLED dashboard"
+        },
+        "data_description": {
+          "create_dashboard": "Adds an ArtiLED page to the sidebar that builds itself from the Hub. Created once; if you delete it later it stays deleted (Configure can put it back)."
         }
       },
       "reauth_confirm": {
@@ -28,6 +32,16 @@
       "reauth_successful": "You are signed in again.",
       "reauth_failed": "That configuration entry no longer exists.",
       "wrong_hub": "Those credentials belong to a different ArtiLED Hub. Sign in to the Hub already configured here, or add the other Hub as a new integration."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ArtiLED",
+        "data": {
+          "create_dashboard_again": "Create the ArtiLED dashboard (again)"
+        }
+      }
     }
   }
 }
