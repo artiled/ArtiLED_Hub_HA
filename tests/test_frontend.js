@@ -62,7 +62,7 @@ vm.createContext(sandbox);
 
 const source =
   fs.readFileSync(SRC, "utf8") +
-  "\n;globalThis.__t = {font_color, background, entity_rgb, tile_status, classify, run_picker_suffix, fa_name};\n";
+  "\n;globalThis.__t = {font_color, background, entity_rgb, tile_status, classify, run_picker_suffix, fa_name, voice_item_key};\n";
 vm.runInContext(source, sandbox, { filename: SRC });
 const t = sandbox.__t;
 
@@ -464,6 +464,20 @@ check("a 'first stop' luminance would wrongly darken white+black",
       "if these matched, the averaging check would prove nothing");
 
 console.log();
+/* ------------------------------------------------------------------ */
+console.log("\nvoice choices match scene and mode names ignoring case (Michel 2026-09-10)");
+check("Relax and relax are one voice item", t.voice_item_key("Relax") === t.voice_item_key("relax"));
+check("different names stay different", t.voice_item_key("Relax") !== t.voice_item_key("Relaxed"));
+check("an accented capital folds (\u00c9lan / \u00e9lan)", t.voice_item_key("\u00c9lan") === t.voice_item_key("\u00e9lan"));
+check("a missing item is an empty key, never the text undefined", t.voice_item_key(undefined) === "" && t.voice_item_key(null) === "");
+{
+  const src_all = fs.readFileSync(SRC, "utf8");
+  check("scene/mode rows look added entries up by the folded name",
+        src_all.includes("new Map(chosen.map((c) => [voice_item_key(c.item), c]))") && src_all.includes("by_item.get(voice_item_key(item))"));
+  check("the name check finds its own entry by the folded name",
+        src_all.includes("voice_item_key(c.item) === voice_item_key(row.dataset.item)"));
+}
+
 if (FAILURES.length) {
   console.log(`${FAILURES.length} FAILED: ${FAILURES.join(", ")}`);
   process.exit(1);

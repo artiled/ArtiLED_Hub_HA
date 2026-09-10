@@ -1234,6 +1234,13 @@ const ASSISTANTS = [
 /* Domains an assistant can actually be asked to control. A name clash only
    matters between two things a person could mean by the same sentence, so a
    diagnostic sensor sharing a name with a light is not a clash. */
+/* Scene and mode names ignore case when MATCHED (Michel 2026-09-10): the Hub and the
+   nodes start "relax" and "Relax" as one scene. A voice entry keeps and shows the
+   spelling it was added with; only the comparison lowercases. */
+function voice_item_key(item) {
+  return String(item === undefined || item === null ? "" : item).toLowerCase();
+}
+
 const VOICE_DOMAINS = new Set([
   "light", "switch", "cover", "media_player", "climate", "fan", "lock", "scene",
 ]);
@@ -1458,9 +1465,9 @@ class ArtiLedVoiceCard extends HTMLElement {
   _scoped_rows(scope, what) {
     const items = what === "scene" ? scope.scenes : scope.modes;
     const chosen = what === "scene" ? scope.chosen_scenes : scope.chosen_modes;
-    const by_item = new Map(chosen.map((c) => [c.item, c]));
+    const by_item = new Map(chosen.map((c) => [voice_item_key(c.item), c]));
     return items.map((item) => {
-      const hit = by_item.get(item);
+      const hit = by_item.get(voice_item_key(item));
       /* The suggested name is what someone would SAY. "Cinema" in the Cinema
          would become "Cinema Cinema", so a repeated word collapses. */
       const suggest = scope.name.toLowerCase() === String(item).toLowerCase()
@@ -1626,7 +1633,7 @@ class ArtiLedVoiceCard extends HTMLElement {
     if (!warn) return;
     const chosen = (this._config.scoped || [])
       .flatMap((s) => (row.dataset.what === "scene" ? s.chosen_scenes : s.chosen_modes))
-      .find((c) => c && c.item === row.dataset.item);
+      .find((c) => c && voice_item_key(c.item) === voice_item_key(row.dataset.item));
     const taken = this._name_taken(input.value || input.placeholder,
                                    chosen && chosen.entity);
     warn.textContent = taken ? "⚠" : "";

@@ -259,8 +259,11 @@ check("choosing one reloads so the entity appears now",
 check("exactly one scope is enforced",
       "_exactly_one_scope" in IN,
       "neither is not house-wide, it is a mistake; both is meaningless")
+VO = (pathlib.Path(__file__).resolve().parent.parent / "custom_components"
+      / "artiled_hub" / "voice.py").read_text()
 check("re-adding the same pair replaces rather than duplicates",
-      "so re-adding is a rename" in IN)
+      "so re-adding is a rename" in VO and "from .voice import without_entry" in IN,
+      "the rule lives in voice.py (names ignore case, 2026-09-10); tests/test_voice.py pins its behaviour")
 
 print("\nscoped modes (a SWITCH — a mode runs until stopped)")
 SW = (pathlib.Path(__file__).resolve().parent.parent / "custom_components"

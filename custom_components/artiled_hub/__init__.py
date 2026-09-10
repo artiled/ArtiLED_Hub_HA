@@ -43,6 +43,7 @@ from .const import (
 from .coordinator import ArtiHubCoordinator
 from .icons import HubIcons
 from .entity_ids import parse_run_picker
+from .voice import without_entry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -941,15 +942,6 @@ def _register_services(hass: HomeAssistant) -> None:
         await data["voice_store"].async_save({"scenes": scenes, "modes": modes})
         await hass.config_entries.async_reload(data["entry_id"])
 
-    def _without(chosen: list, kind: str, item_id: int, field: str, value: str) -> list:
-        """Everything except this exact scope+item — so re-adding is a rename,
-        not a duplicate."""
-        return [
-            t for t in (chosen or [])
-            if not (t["kind"] == kind and int(t["id"]) == item_id
-                    and str(t.get(field)) == str(value))
-        ]
-
     async def add_voice_scene(call: ServiceCall) -> None:
         """Give one room/zone + scene a NAME, and an entity to answer to it."""
         data = _entry_data(call)
@@ -957,7 +949,7 @@ def _register_services(hass: HomeAssistant) -> None:
             return
         kind = "room" if "room" in call.data else "zone"
         item_id = int(call.data[kind])
-        scenes = _without(data.get("voice_scenes"), kind, item_id, "scene",
+        scenes = without_entry(data.get("voice_scenes"), kind, item_id, "scene",
                           call.data["scene"])
         scenes.append({
             "kind": kind, "id": item_id,
@@ -970,7 +962,7 @@ def _register_services(hass: HomeAssistant) -> None:
         if not data:
             return
         kind = "room" if "room" in call.data else "zone"
-        scenes = _without(data.get("voice_scenes"), kind, int(call.data[kind]),
+        scenes = without_entry(data.get("voice_scenes"), kind, int(call.data[kind]),
                           "scene", call.data["scene"])
         await _save_voice(data, scenes, data.get("voice_modes") or [])
 
@@ -981,7 +973,7 @@ def _register_services(hass: HomeAssistant) -> None:
             return
         kind = "room" if "room" in call.data else "zone"
         item_id = int(call.data[kind])
-        modes = _without(data.get("voice_modes"), kind, item_id, "mode",
+        modes = without_entry(data.get("voice_modes"), kind, item_id, "mode",
                          call.data["mode"])
         modes.append({
             "kind": kind, "id": item_id,
@@ -994,7 +986,7 @@ def _register_services(hass: HomeAssistant) -> None:
         if not data:
             return
         kind = "room" if "room" in call.data else "zone"
-        modes = _without(data.get("voice_modes"), kind, int(call.data[kind]),
+        modes = without_entry(data.get("voice_modes"), kind, int(call.data[kind]),
                          "mode", call.data["mode"])
         await _save_voice(data, data.get("voice_scenes") or [], modes)
 
