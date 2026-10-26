@@ -42,7 +42,7 @@ from .const import (
 )
 from .coordinator import ArtiHubCoordinator
 from .icons import HubIcons
-from .entity_ids import parse_run_picker
+from .entity_ids import parse_run_picker, voice_mode_unique_id, voice_scene_unique_id
 from .voice import without_entry
 
 _LOGGER = logging.getLogger(__name__)
@@ -451,6 +451,16 @@ async def _voice_defaults_once(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     ⚠ Hiding them was NOT an option: they belong on the dashboard's Lights tab
     and have their own pages. Hidden would remove them from the UI as well.
+
+    ⚠ A VOICE SCENE OR VOICE MODE IS THE EXCEPTION (Michel 2026-10-26). Adding
+    one on the Voice page IS the request for voice, so it is exposed to Assist
+    and to every cloud assistant enabled in this Home Assistant
+    (_voice_assistants) - REGARDLESS of its room/zone's own exposure. 0.32.2
+    copied the room's, and on the master scene.kitchen_aurora followed a
+    Kitchen exposed to nothing into silence: Alexa answered "Kitchen doesn't
+    support that". Once per entity, like every default here, so a later change
+    by the user stands. Voice entities that earlier versions left exposed to
+    nothing get the same, ONCE (flag voice_heard_backfill).
     """
     store = Store(hass, STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}_flags")
     flags: dict = await store.async_load() or {}
@@ -459,28 +469,70 @@ async def _voice_defaults_once(hass: HomeAssistant, entry: ConfigEntry) -> None:
     try:
         from homeassistant.components.homeassistant.exposed_entities import (
             async_expose_entity,
+            async_should_expose,
         )
     except ImportError:  # pragma: no cover - the helper moved or went away
         _LOGGER.debug("Voice-exposure helper unavailable; leaving defaults alone")
         return
 
     registry = er.async_get(hass)
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}
+    voice = set(_voice_scopes(data))      # unique_ids of the voice scenes/modes
+    heard = _voice_assistants(hass)
+    backfill = not flags.get("voice_heard_backfill")
     done: set[str] = set()
+    filled = 0
     try:
         for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
             if entity.unique_id in already:
+                # ⚠ The one-time backfill: a voice entity an earlier version
+                # left exposed to NOTHING. One exposed to anything is a choice
+                # (or this rule already applied) and stays as it is.
+                if (backfill and entity.unique_id in voice
+                        and not any(async_should_expose(hass, a, entity.entity_id) for a in ASSISTANTS)):
+                    for assistant in ASSISTANTS:
+                        async_expose_entity(hass, assistant, entity.entity_id, assistant in heard)
+                    filled += 1
                 continue
             done.add(entity.unique_id)
             for assistant in ASSISTANTS:
-                async_expose_entity(hass, assistant, entity.entity_id, False)
+                wanted = entity.unique_id in voice and assistant in heard
+                async_expose_entity(hass, assistant, entity.entity_id, wanted)
     except Exception as err:  # noqa: BLE001 - a default must never block setup
         _LOGGER.warning("Could not apply the voice defaults: %s", err)
         return
 
-    if done:
+    if done or backfill:
         flags["voice_defaults"] = sorted(already | done)
+        flags["voice_heard_backfill"] = True
         await store.async_save(flags)
-        _LOGGER.info("Kept %s entities out of voice by default", len(done))
+    if done:
+        _LOGGER.info("Applied the voice default to %s new entities", len(done))
+    if filled:
+        _LOGGER.info("Made %s voice scenes/modes that were exposed to nothing heard", filled)
+
+
+def _voice_assistants(hass: HomeAssistant) -> set[str]:
+    """Assist, plus each Home Assistant Cloud assistant that is switched on.
+
+    Read as core 2026.10.4 keeps it (components/cloud): hass.data[DATA_CLOUD]
+    (HassKey "cloud") -> Cloud, with is_logged_in and
+    client.prefs.alexa_enabled / google_enabled. ⚠ Guarded: no cloud, logged
+    out, or a future HA that moved these -> Assist only, never an error.
+    """
+    wanted = {"conversation"}
+    try:
+        cloud = hass.data.get("cloud")
+        if cloud is None or not getattr(cloud, "is_logged_in", False):
+            return wanted
+        prefs = cloud.client.prefs
+        if getattr(prefs, "alexa_enabled", False) is True:
+            wanted.add("cloud.alexa")
+        if getattr(prefs, "google_enabled", False) is True:
+            wanted.add("cloud.google_assistant")
+    except Exception as err:  # noqa: BLE001 - never block a default
+        _LOGGER.debug("Could not read which cloud assistants are on: %s", err)
+    return wanted
 
 
 async def _hide_house_wide_once(hass: HomeAssistant, entry: ConfigEntry, hub_ident: str) -> None:
@@ -528,6 +580,87 @@ async def _hide_house_wide_once(hass: HomeAssistant, entry: ConfigEntry, hub_ide
             "Hid %s house-wide scene/mode entities; they still work and any "
             "automation referencing them is unaffected", hidden
         )
+
+
+# What a voice choice is, per kind: its stored list, its item field, its
+# entity domain and how its unique_id is built.
+VOICE_KINDS = {
+    "scene": ("voice_scenes", "scene", voice_scene_unique_id),
+    "mode": ("voice_modes", "switch", voice_mode_unique_id),
+}
+
+
+def _voice_uid(ident: str, what: str, target: dict) -> str:
+    return VOICE_KINDS[what][2](ident, target["kind"], int(target["id"]), slugify(str(target[what])))
+
+
+def _voice_scopes(data: dict) -> dict[str, str]:
+    """Each stored voice scene's and voice mode's unique_id -> its room/zone
+    light's unique_id."""
+    ident = str(data.get("hub_ident") or "")
+    return {
+        _voice_uid(ident, what, t): f"{ident}_{t['kind']}_{int(t['id'])}"
+        for what, (key, _, _) in VOICE_KINDS.items()
+        for t in data.get(key) or []
+    }
+
+
+async def _forget_voice_entities(hass: HomeAssistant, entry_id: str, unique_ids: set[str]) -> None:
+    """Leave nothing behind of removed voice scenes/modes (Michel 2026-10-26).
+
+    ⚠ Home Assistant keeps a removed registry entry as a DeletedRegistryEntry
+    and RESTORES its entity_id, name, aliases and exposure options when the
+    same unique_id is created again (core 2026.10.4 entity_registry.py
+    async_get_or_create). A voice scene removed and added again must come back
+    clean - as its spoken name - so those entries are dropped. Guarded: if a
+    future Home Assistant renames deleted_entities, nothing breaks, the re-add
+    is merely not as clean. And the once-only voice default is forgotten for
+    it, so a re-add is treated as new and is exposed as its room is then.
+    """
+    if not unique_ids:
+        return
+    registry = er.async_get(hass)
+    deleted = getattr(registry, "deleted_entities", None)
+    if isinstance(deleted, dict):
+        doomed = [key for key in deleted
+                  if isinstance(key, tuple) and len(key) == 3
+                  and key[1] == DOMAIN and key[2] in unique_ids]
+        for key in doomed:
+            deleted.pop(key, None)
+        if doomed and hasattr(registry, "async_schedule_save"):
+            registry.async_schedule_save()
+    store = Store(hass, STORAGE_VERSION, f"{DOMAIN}_{entry_id}_flags")
+    flags: dict = await store.async_load() or {}
+    seen = list(flags.get("voice_defaults") or [])
+    if any(uid in unique_ids for uid in seen):
+        flags["voice_defaults"] = [uid for uid in seen if uid not in unique_ids]
+        await store.async_save(flags)
+
+
+async def _retire_voice(hass: HomeAssistant, data: dict, what: str, targets: list[dict]) -> None:
+    """The registry entries of these voice scene/mode choices - un-exposed FIRST,
+    then deleted, then forgotten (see _unexpose and _forget_voice_entities).
+
+    ⚠ Dropping the stored choice alone is not enough: the reload no longer
+    builds the entity, but its registry entry would stay ("no longer
+    provided"), keep its exposure, and come back with its OLD entity_id when
+    the same scene is added again. Matched by exact unique_id within this
+    entry, so nothing else of the room is touched.
+    """
+    if not targets:
+        return
+    ident = str(data.get("hub_ident") or "")
+    wanted = {_voice_uid(ident, what, t) for t in targets}
+    registry = er.async_get(hass)
+    doomed = [
+        e.entity_id for e in er.async_entries_for_config_entry(registry, data["entry_id"])
+        if e.unique_id in wanted
+    ]
+    if _unexpose(hass, doomed):
+        await asyncio.sleep(0)
+    for entity_id in doomed:
+        registry.async_remove(entity_id)
+    await _forget_voice_entities(hass, data["entry_id"], wanted)
 
 
 def _unexpose(hass: HomeAssistant, entity_ids: list[str]) -> bool:
@@ -622,6 +755,29 @@ async def _prune_deleted(
 
     for device in doomed_devices:
         device_registry.async_remove_device(device.id)
+
+    # ⚠ Voice scenes and modes are on NO device (see ArtiHubScopedScene), so
+    # removing a room's device no longer takes them along. A choice whose
+    # room/zone the Hub no longer has (after the same grace as the device) is
+    # dropped from the store - or the platform would build it again - and
+    # retired.
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if entry_data is not None:
+        dropped = 0
+        for what, (key, _, _) in VOICE_KINDS.items():
+            chosen = entry_data.get(key) or []
+            orphaned = [t for t in chosen if (t["kind"], int(t["id"])) not in present]
+            if orphaned:
+                await _retire_voice(hass, entry_data, what, orphaned)
+                entry_data[key] = [t for t in chosen if t not in orphaned]
+                dropped += len(orphaned)
+        if dropped:
+            # ⚠ Both lists, always - one file holds them (see _save_voice).
+            await entry_data["voice_store"].async_save({
+                "scenes": entry_data.get("voice_scenes") or [],
+                "modes": entry_data.get("voice_modes") or [],
+            })
+            _LOGGER.info("Removed %s voice scenes/modes of rooms/zones gone from the Hub", dropped)
 
     # Scenes, modes and flows hang off the hub device itself, so the sweep
     # above never reaches them. Prune them by unique_id, scoped to that one
@@ -951,6 +1107,12 @@ def _register_services(hass: HomeAssistant) -> None:
         item_id = int(call.data[kind])
         scenes = without_entry(data.get("voice_scenes"), kind, item_id, "scene",
                           call.data["scene"])
+        if len(scenes) == len(data.get("voice_scenes") or []):
+            # ⚠ A NEW choice, not a rename: a registry entry already under its
+            # unique_id is a leftover (0.32.1 and earlier never deleted one on
+            # remove) and would hand back its old entity_id, name and
+            # exposure. Retire it so the add is clean.
+            await _retire_voice(hass, data, "scene", [{"kind": kind, "id": item_id, "scene": call.data["scene"]}])
         scenes.append({
             "kind": kind, "id": item_id,
             "scene": call.data["scene"], "name": call.data["name"],
@@ -962,8 +1124,12 @@ def _register_services(hass: HomeAssistant) -> None:
         if not data:
             return
         kind = "room" if "room" in call.data else "zone"
-        scenes = without_entry(data.get("voice_scenes"), kind, int(call.data[kind]),
+        current = data.get("voice_scenes") or []
+        scenes = without_entry(current, kind, int(call.data[kind]),
                           "scene", call.data["scene"])
+        # ⚠ The entity itself goes too - un-exposed, deleted and forgotten - or
+        # it lingers as "no longer provided" and a re-add gets its old id back.
+        await _retire_voice(hass, data, "scene", [t for t in current if t not in scenes])
         await _save_voice(data, scenes, data.get("voice_modes") or [])
 
     async def add_voice_mode(call: ServiceCall) -> None:
@@ -975,6 +1141,9 @@ def _register_services(hass: HomeAssistant) -> None:
         item_id = int(call.data[kind])
         modes = without_entry(data.get("voice_modes"), kind, item_id, "mode",
                          call.data["mode"])
+        if len(modes) == len(data.get("voice_modes") or []):
+            # A NEW choice: retire a leftover entry first (see add_voice_scene).
+            await _retire_voice(hass, data, "mode", [{"kind": kind, "id": item_id, "mode": call.data["mode"]}])
         modes.append({
             "kind": kind, "id": item_id,
             "mode": call.data["mode"], "name": call.data["name"],
@@ -986,8 +1155,11 @@ def _register_services(hass: HomeAssistant) -> None:
         if not data:
             return
         kind = "room" if "room" in call.data else "zone"
-        modes = without_entry(data.get("voice_modes"), kind, int(call.data[kind]),
+        current = data.get("voice_modes") or []
+        modes = without_entry(current, kind, int(call.data[kind]),
                          "mode", call.data["mode"])
+        # ⚠ The switch itself goes too (see remove_voice_scene).
+        await _retire_voice(hass, data, "mode", [t for t in current if t not in modes])
         await _save_voice(data, data.get("voice_scenes") or [], modes)
 
     hass.services.async_register(DOMAIN, "set_color", set_color, schema=COLOR_SCHEMA)

@@ -62,7 +62,12 @@ vm.createContext(sandbox);
 
 const source =
   fs.readFileSync(SRC, "utf8") +
-  "\n;globalThis.__t = {font_color, background, entity_rgb, tile_status, classify, run_picker_suffix, fa_name, voice_item_key};\n";
+  "\n;globalThis.__t = {font_color, background, entity_rgb, tile_status, classify, run_picker_suffix, fa_name, voice_item_key,\n" +
+  "  aliases_shown: typeof aliases_shown === \"function\" ? aliases_shown : undefined,\n" +
+  "  aliases_to_save: typeof aliases_to_save === \"function\" ? aliases_to_save : undefined,\n" +
+  "  layout_word: typeof layout_word === \"function\" ? layout_word : undefined,\n" +
+  "  layout_read: typeof layout_read === \"function\" ? layout_read : undefined,\n" +
+  "  layout_columns: typeof layout_columns === \"function\" ? layout_columns : undefined};\n";
 vm.runInContext(source, sandbox, { filename: SRC });
 const t = sandbox.__t;
 
@@ -203,10 +208,11 @@ check("the Voice page is withheld from non-admins",
       "a member would otherwise get a page of controls that all error");
 check("exposure uses the assistants[] websocket command",
       /type: "homeassistant\/expose_entity"[\s\S]{0,200}assistants: \[/.test(SOURCE));
-check("aliases go through the entity registry, filtered of nulls",
+check("aliases go through the entity registry; the null is hidden, never dropped",
       /type: "config\/entity_registry\/update"[\s\S]{0,120}aliases/.test(SOURCE) &&
-      /aliases \|\| \[\]\)\.filter\(Boolean\)/.test(SOURCE),
-      "HA leaves a stray null in aliases on some entries");
+      /aliases_shown\(\(entry \|\| \{\}\)\.aliases\)/.test(SOURCE) &&
+      /aliases_to_save\(input\.value, this\._alias_raw\.get\(input\.dataset\.e\)\)/.test(SOURCE),
+      "the null is HA 2026.10's computed own name - see the alias block below");
 check("a failed toggle is rolled back, not left looking saved",
       /pill\.classList\.toggle\("on", !on\);/.test(SOURCE));
 
@@ -478,9 +484,403 @@ check("a missing item is an empty key, never the text undefined", t.voice_item_k
         src_all.includes("voice_item_key(c.item) === voice_item_key(row.dataset.item)"));
 }
 
+/* ------------------------------------------------------------------ */
+console.log("\nvoice aliases keep HA 2026.10's own-name entry (Michel 2026-10-26, as the Control)");
+{
+  /* HA 2026.10 keeps the entity's own computed name IN its aliases list; the
+     websocket shows it as null and a new entity starts with just [null].
+     Dropping it on save took the entity's own name out of what Assist hears. */
+  const fn = (f) => typeof f === "function";
+  check("aliases: HA's computed-name null is not shown",
+        fn(t.aliases_shown) && t.aliases_shown([null, "Telly room", ""]) === "Telly room");
+  check("aliases: a save keeps the computed-name null",
+        fn(t.aliases_to_save) && JSON.stringify(t.aliases_to_save("Telly room, Den", [null, "Telly room"]))
+          === JSON.stringify([null, "Telly room", "Den"]));
+  check("aliases: an entry read without a null is saved as typed",
+        fn(t.aliases_to_save) && JSON.stringify(t.aliases_to_save("Den", ["Old"])) === JSON.stringify(["Den"]));
+  check("aliases: never read -> the null is kept (HA's default for a new entry)",
+        fn(t.aliases_to_save) && JSON.stringify(t.aliases_to_save("Den", undefined)) === JSON.stringify([null, "Den"]));
+
+  const Voice = defined.get("artiled-voice-card");
+  const fake_input = (entity) => {
+    const el = { dataset: { e: entity }, value: "", listeners: {} };
+    el.addEventListener = (ev, f) => { (el.listeners[ev] = el.listeners[ev] || []).push(f); };
+    return el;
+  };
+  const make_card = (registry) => {
+    const card = Object.create(Voice.prototype);
+    card._alias_raw = new Map();
+    card.calls = [];
+    card._hass = {
+      user: { is_admin: true }, states: {},
+      callWS: async (msg) => {
+        card.calls.push(msg);
+        if (msg.type === "config/entity_registry/get") return registry[msg.entity_id] || {};
+        return {};
+      },
+    };
+    return card;
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  /* The Lights/Rooms tab: read, shown without the null, saved with it. */
+  (async () => {
+    const registry = { "light.kitchen": { aliases: [null, "Telly room"], options: {} } };
+    const card = make_card(registry);
+    const input = fake_input("light.kitchen");
+    card.shadowRoot = {
+      querySelectorAll: (sel) => (sel === ".item" ? [{ dataset: { e: "light.kitchen" } }] : []),
+      querySelector: (sel) => (sel === 'input[data-e="light.kitchen"]' ? input : null),
+    };
+    await card._load();
+    check("rooms tab: the field shows the user's aliases, not the null", input.value === "Telly room", input.value);
+    input.value = "Telly room, Den";
+    await card._save_aliases(input);
+    const upd = card.calls.find((c) => c.type === "config/entity_registry/update");
+    check("rooms tab: a save puts the own-name null back first",
+          upd && JSON.stringify(upd.aliases) === JSON.stringify([null, "Telly room", "Den"]), JSON.stringify(upd));
+
+    /* The Scenes/Modes tab: an added one shows its aliases under it. */
+    const scope = { kind: "room", id: 5, name: "Cinema", scenes: ["Cinema", "Warm"], modes: [],
+                    chosen_scenes: [{ item: "Warm", name: "Movie warmth", entity: "scene.movie_warmth" }], chosen_modes: [] };
+    card._config = { scoped: [scope] };
+    const rows = card._scoped_rows(scope, "scene");
+    check("scenes tab: an added scene has the Rooms tab's 'also called' field under it",
+          /data-item="Warm"[\s\S]*?<\/div>\s*<div class="aliases">\s*<input type="text" data-e="scene\.movie_warmth"\s+placeholder="also called — comma separated">/.test(rows), rows);
+    check("scenes tab: a row not added has no alias field", (rows.match(/class="aliases"/g) || []).length === 1);
+
+    const s_registry = { "scene.movie_warmth": { aliases: [null, "Film warmth"] } };
+    const sc = make_card(s_registry);
+    sc._config = { scoped: [scope] };
+    const alias_in = fake_input("scene.movie_warmth");
+    const name_in = fake_input(undefined);
+    const box = {
+      innerHTML: "",
+      querySelectorAll: (sel) => ({ ".tick": [], ".opt input": [name_in], ".aliases input": [alias_in] }[sel] || []),
+    };
+    const d = { dataset: { kind: "room", id: "5", what: "scene" }, querySelector: () => box };
+    if (typeof sc._fill_scoped === "function") sc._fill_scoped(d);
+    await settle(); await settle();
+    check("scenes tab: opening the room reads the scene's aliases into its field",
+          alias_in.value === "Film warmth" && sc.calls.some((c) => c.type === "config/entity_registry/get"
+            && c.entity_id === "scene.movie_warmth"), alias_in.value);
+    check("scenes tab: the alias field saves (change and blur), the name field renames",
+          (alias_in.listeners.change || []).length === 1 && (alias_in.listeners.blur || []).length === 1
+          && !(alias_in.listeners.input) && (name_in.listeners.change || []).length === 1);
+    alias_in.value = "Film warmth, Cosy film";
+    if (alias_in.listeners.change) alias_in.listeners.change[0]();
+    await settle();
+    const supd = sc.calls.find((c) => c.type === "config/entity_registry/update");
+    check("scenes tab: editing it saves the scene's aliases, its own-name null kept",
+          supd && supd.entity_id === "scene.movie_warmth"
+          && JSON.stringify(supd.aliases) === JSON.stringify([null, "Film warmth", "Cosy film"]), JSON.stringify(supd));
+    await dom_tests();
+    await layout_tests();
+    finish();
+  })().catch((e) => { check("alias tests ran", false, String(e && e.stack || e)); finish(); });
+}
+
+/* ------------------------------------------------------------------ *
+ * The Voice card in a DOM (jsdom), across the reload adding causes.
+ * ------------------------------------------------------------------ */
+async function dom_tests() {
+  console.log("\nvoice page survives the reload an add or rename causes (Michel 2026-10-26, as the Control)");
+  const os = require("os");
+  const JSDOM_PATH = process.env.JSDOM_PATH || path.join(os.homedir(), "tools/jsdom/node_modules/jsdom");
+  let JSDOM;
+  try {
+    ({ JSDOM } = require(JSDOM_PATH));
+  } catch (e) {
+    check(`jsdom is available at ${JSDOM_PATH}`, false, "set JSDOM_PATH");
+    return;
+  }
+  const dom = new JSDOM("<!doctype html><html><body></body></html>",
+                        { runScripts: "outside-only", url: "http://ha.local/artiled-app/voice" });
+  const win = dom.window;
+  win.setInterval = () => 0;
+  win.clearInterval = () => {};
+  win.fetch = () => Promise.resolve({ ok: false });
+  win.eval(fs.readFileSync(SRC, "utf8"));
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+  const calls = [];
+  const make_hass = () => ({
+    states: { "light.kitchen": { state: "on", attributes: { friendly_name: "Kitchen" } } },
+    user: { is_admin: true },
+    callService: (domain, service, data) => { calls.push([domain, service, data]); return Promise.resolve(); },
+    callWS: (msg) => Promise.resolve(msg.type === "config/entity_registry/get" ? { aliases: [null], options: {} } : {}),
+  });
+  /* What the strategy hands the card after the reload: the chosen scene with
+     whatever name the reloaded config carries. */
+  const config = (chosen) => ({
+    rooms: [{ entity: "light.kitchen", name: "Kitchen", suggest: "Kitchen Lights" }],
+    zones: [], lights: [],
+    scoped: [{ kind: "room", id: 7, name: "Kitchen", scenes: ["Relax", "Warm"], modes: [],
+               chosen_scenes: chosen, chosen_modes: [] }],
+  });
+  let card = null;
+  const mount = async (chosen) => {
+    if (card) card.remove();
+    card = win.document.createElement("artiled-voice-card");
+    card.setConfig(config(chosen));
+    win.document.body.appendChild(card);
+    card.hass = make_hass();
+    await settle();
+    return card.shadowRoot;
+  };
+  let r = await mount([]);
+  r.querySelector('.tab[data-t="scenes"]').click();
+  const d = r.querySelector('details[data-kind="room"][data-id="7"]');
+  d.open = true;
+  d.dispatchEvent(new win.Event("toggle"));
+  await settle();
+  const row = () => r.querySelectorAll(".opt")[0];
+  row().querySelector("input").value = "Relax time";
+  row().querySelector(".tick").click();
+  await settle();
+  check("+ sends the typed name", JSON.stringify(calls[calls.length - 1]) === JSON.stringify(
+    ["artiled_hub", "add_voice_scene", { room: 7, scene: "Relax", name: "Relax time" }]), JSON.stringify(calls));
+
+  /* The reload: a NEW card, not yet carrying the new scene. */
+  r = await mount([]);
+  check("after the reload: still on the Scenes tab, not back on the first",
+        ((r.querySelector(".tab.on") || {}).textContent || "").startsWith("Scenes"),
+        (r.querySelector(".tab.on") || {}).textContent);
+  const d2 = r.querySelector('details[data-kind="room"][data-id="7"]');
+  check("after the reload: the room is still open, its rows filled",
+        d2.open === true && r.querySelectorAll(".opt").length === 2);
+  check("after the reload: the typed name is held until the reload carries it",
+        row() && row().querySelector("input").value === "Relax time", row() && row().querySelector("input").value);
+
+  r = await mount([{ item: "Relax", name: "Relax time", entity: "scene.relax_time" }]);
+  check("carried: the + reads ticked with the stored name",
+        row().querySelector(".tick").classList.contains("on") && row().querySelector("input").value === "Relax time");
+  r = await mount([{ item: "Relax", name: "Renamed elsewhere", entity: "scene.relax_time" }]);
+  check("once carried, the typed name is let go (a later change elsewhere shows)",
+        row().querySelector("input").value === "Renamed elsewhere", row().querySelector("input").value);
+
+  /* A rename: held through the reload that still carries the old name. */
+  row().querySelector("input").value = "Chill out";
+  row().querySelector("input").dispatchEvent(new win.Event("change"));
+  await settle();
+  r = await mount([{ item: "Relax", name: "Renamed elsewhere", entity: "scene.relax_time" }]);
+  check("a rename is held across the reload until it is carried",
+        row().querySelector("input").value === "Chill out", row().querySelector("input").value);
+
+  /* Unticked: nothing held. */
+  r = await mount([{ item: "Relax", name: "Chill out", entity: "scene.relax_time" }]);
+  row().querySelector(".tick").click();
+  await settle();
+  r = await mount([]);
+  check("unticked: no name held, the suggestion shows again",
+        row().querySelector("input").value === "", row().querySelector("input").value);
+
+  /* Closing the room and picking another tab is remembered too. */
+  const d3 = r.querySelector('details[data-kind="room"][data-id="7"]');
+  d3.open = false;
+  d3.dispatchEvent(new win.Event("toggle"));
+  r.querySelector('.tab[data-t="rooms"]').click();
+  r = await mount([]);
+  check("the tab chosen last is the one kept",
+        ((r.querySelector(".tab.on") || {}).textContent || "").startsWith("Rooms"));
+  check("a room closed before the reload stays closed",
+        r.querySelector('details[data-kind="room"][data-id="7"]').open === false);
+  dom.window.close();
+}
+
+function finish() {
 if (FAILURES.length) {
   console.log(`${FAILURES.length} FAILED: ${FAILURES.join(", ")}`);
   process.exit(1);
 }
 console.log("all frontend rules pass");
 process.exit(0);
+}
+
+/* ------------------------------------------------------------------ *
+ * Tile layouts: Grid (default), Square, List, Rows - the webapp's
+ * Settings > Layout (app/js/layout.js), Michel 2026-10-26.
+ * ------------------------------------------------------------------ */
+async function layout_tests() {
+  console.log("\ntile layouts: the webapp's Grid / Square / List / Rows (Michel 2026-10-26)");
+  const fn = (f) => typeof f === "function";
+  check("layout: the words are layout.js's own, Grid the default",
+        fn(t.layout_word) && t.layout_word(null) === "grid" && t.layout_word("bogus") === "grid"
+        && t.layout_word("square") === "square" && t.layout_word("list") === "list" && t.layout_word("rows") === "rows");
+  check("layout: a stored 'compact' reads as square (layout.js OLD_NAMES)",
+        fn(t.layout_word) && t.layout_word("compact") === "square");
+  const store = (v) => ({ localStorage: { getItem: () => v } });
+  const thrower = { get localStorage() { throw new Error("denied"); } };
+  check("layout: nothing stored is Grid",
+        fn(t.layout_read) && t.layout_read(null, store(null)) === "grid");
+  check("layout: the browser's stored choice is used",
+        fn(t.layout_read) && t.layout_read(null, store("list")) === "list");
+  check("layout: a fixed strategy choice wins over the browser's",
+        fn(t.layout_read) && t.layout_read("square", store("list")) === "square");
+  check("layout: a throwing localStorage gives Grid, not a broken dashboard",
+        fn(t.layout_read) && t.layout_read(null, thrower) === "grid");
+
+  /* app.css (phone) and tablet.css (iPad) column counts, by the card's width. */
+  const cols = (l, w, land) => fn(t.layout_columns) ? t.layout_columns(l, w, land).cols : -1;
+  check("columns, phone: Grid 2, Square 2, List 1, Rows 1",
+        cols("grid", 390, false) === 2 && cols("square", 390, false) === 2
+        && cols("list", 390, false) === 1 && cols("rows", 390, false) === 1);
+  check("columns, tablet portrait: Grid 4, Square 4, List 2, Rows 2",
+        cols("grid", 760, false) === 4 && cols("square", 760, false) === 4
+        && cols("list", 760, false) === 2 && cols("rows", 760, false) === 2);
+  check("columns, landscape: Grid 6, Square 6, List 2, Rows 2",
+        cols("grid", 1300, true) === 6 && cols("square", 1300, true) === 6
+        && cols("list", 1300, true) === 2 && cols("rows", 1300, true) === 2);
+  check("columns, a narrow landscape (the 1024 iPad): Grid 5, Square stays 6",
+        cols("grid", 950, true) === 5 && cols("square", 950, true) === 6);
+  check("columns, a wide card in portrait keeps the portrait counts",
+        cols("grid", 980, false) === 4);
+  check("columns: a desktop-width card fills rows with several tiles (Grid >= 5)",
+        cols("grid", 1250, true) >= 5);
+
+  const SRC_ALL = fs.readFileSync(SRC, "utf8");
+  check("tile CSS: Grid's name on its own 38px line, ordered last (app.css .layout-grid .app-tile__text)",
+        /:host\(\[layout="grid"\]\) \.text,\s*:host\(\[layout="square"\]\) \.text \{[^}]*order: 1;[^}]*flex: 0 0 100%;[^}]*height: 38px;/.test(SRC_ALL));
+  check("tile CSS: Square is the Grid card as a square (aspect-ratio 1)",
+        /:host\(\[layout="square"\]\) \.tile \{[^}]*aspect-ratio: 1;/.test(SRC_ALL));
+  check("tile CSS: List has no card, no wash and no slider",
+        /:host\(\[layout="list"\]\) \.wash,\s*:host\(\[layout="list"\]\) \.slider \{\s*display: none;/.test(SRC_ALL));
+
+  const os = require("os");
+  const JSDOM_PATH = process.env.JSDOM_PATH || path.join(os.homedir(), "tools/jsdom/node_modules/jsdom");
+  const { JSDOM } = require(JSDOM_PATH);
+  const dom = new JSDOM("<!doctype html><html><body></body></html>",
+                        { runScripts: "outside-only", url: "http://ha.local/artiled-app/home" });
+  const win = dom.window;
+  win.setInterval = () => 0;
+  win.clearInterval = () => {};
+  win.fetch = () => Promise.resolve({ ok: false });
+  win.eval(fs.readFileSync(SRC, "utf8"));
+  const settle = () => new Promise((r) => setTimeout(r, 10));
+  const hass = {
+    states: {
+      "light.kitchen": { state: "on", attributes: { friendly_name: "Kitchen", artiled_colors: ["rgb(255,0,0)", "rgb(0,0,255)"] } },
+      "light.lounge": { state: "off", attributes: { friendly_name: "Lounge" } },
+      "light.spots": { state: "off", attributes: { friendly_name: "Spots" } },
+    },
+    user: { is_admin: false },
+    callService: () => Promise.resolve(),
+  };
+  const groups = [
+    { heading: "Rooms", tiles: [{ entity: "light.kitchen", kind: "room" }, { entity: "light.lounge", kind: "room" }] },
+    { heading: "Zones", tiles: [{ entity: "light.spots", kind: "zone" }] },
+  ];
+  let card = null;
+  const mount = async (extra) => {
+    if (card) card.remove();
+    card = win.document.createElement("artiled-home-card");
+    if (!fn(card.setConfig)) return null;
+    card.setConfig({ groups, ...(extra || {}) });
+    win.document.body.appendChild(card);
+    card.hass = hass;
+    await settle();
+    return card.shadowRoot;
+  };
+  const boxes = (r) => [...r.querySelectorAll(".app-tiles")];
+  const tiles = (r) => [...r.querySelectorAll("artiled-tile-card")];
+
+  win.localStorage.clear();
+  let r = await mount();
+  check("home card: registered and rendered", !!r);
+  if (!r) return;
+  check("home card: the webapp's Rooms then Zones headings",
+        [...r.querySelectorAll(".app-section")].map((h) => h.textContent).join("|") === "Rooms|Zones");
+  check("home card: nothing stored = Grid on every list and tile",
+        boxes(r).length === 2 && boxes(r).every((b) => b.dataset.layout === "grid")
+        && tiles(r).length === 3 && tiles(r).every((c) => c.getAttribute("layout") === "grid"));
+  const picks = [...r.querySelectorAll(".tt-tile[data-layout]")];
+  check("home card: a layout switch with the webapp's four choices, in its order",
+        picks.map((b) => b.dataset.layout).join(",") === "rows,grid,square,list");
+  check("home card: Grid is marked as the current choice",
+        (r.querySelector(".tt-tile.is-running") || {}).dataset?.layout === "grid");
+  r.querySelector('.tt-tile[data-layout="square"]').click();
+  await settle();
+  check("home card: picking Square redraws the tiles as Square",
+        boxes(r).every((b) => b.dataset.layout === "square") && tiles(r).every((c) => c.getAttribute("layout") === "square"));
+  check("home card: the choice is remembered in this browser (artiled_layout)",
+        win.localStorage.getItem("artiled_layout") === "square");
+  r = await mount();
+  check("home card: a reload comes back as Square",
+        boxes(r).every((b) => b.dataset.layout === "square")
+        && (r.querySelector(".tt-tile.is-running") || {}).dataset?.layout === "square");
+
+  r = await mount({ layout: "list" });
+  check("home card: a fixed strategy layout wins and hides the switch",
+        boxes(r).every((b) => b.dataset.layout === "list") && !r.querySelector(".tt-tile[data-layout]"));
+
+  /* localStorage that throws (private mode, blocked storage) */
+  const real = Object.getOwnPropertyDescriptor(win, "localStorage");
+  Object.defineProperty(win, "localStorage", { configurable: true, get() { throw new Error("denied"); } });
+  let threw = false;
+  try {
+    r = await mount();
+    r.querySelector('.tt-tile[data-layout="list"]').click();
+    await settle();
+  } catch (e) { threw = true; }
+  check("home card: blocked storage: the switch still works on this page",
+        !threw && boxes(r).every((b) => b.dataset.layout === "list"));
+  Object.defineProperty(win, "localStorage", real);
+
+  /* The Zones and Lights tabs of a room are Home's lists too (tablet.css). */
+  win.localStorage.setItem("artiled_layout", "grid");
+  const ent = win.document.createElement("artiled-entity-card");
+  ent.setConfig({ entity: "light.kitchen", zones: [{ entity: "light.spots", kind: "zone" }], lights: [] });
+  win.document.body.appendChild(ent);
+  ent.hass = hass;
+  await settle();
+  const ztab = ent.shadowRoot.querySelector('.tab[data-tab="zones"]');
+  ztab.click();
+  await settle();
+  const zbox = ent.shadowRoot.querySelector('.panel[data-panel="zones"] .app-tiles');
+  check("room page: its Zones tab is a tile list in the chosen layout",
+        !!zbox && zbox.dataset.layout === "grid"
+        && zbox.querySelector("artiled-tile-card").getAttribute("layout") === "grid");
+  if (card) card.remove();
+  card = win.document.createElement("artiled-home-card");
+  card.setConfig({ groups });
+  win.document.body.appendChild(card);
+  card.hass = hass;
+  await settle();
+  card.shadowRoot.querySelector('.tt-tile[data-layout="list"]').click();
+  await settle();
+  check("room page: a switch on Home reaches a room page already open",
+        !!zbox && zbox.dataset.layout === "list");
+  const own = win.document.createElement("artiled-tile-card");
+  own.setConfig({ entity: "light.kitchen", kind: "room" });
+  win.document.body.appendChild(own);
+  own.hass = hass;
+  card.shadowRoot.querySelector('.tt-tile[data-layout="square"]').click();
+  await settle();
+  check("room page: the room's own card stays the Rows card, as the webapp's room screen",
+        !own.hasAttribute("layout") && zbox.dataset.layout === "square");
+  const lit = card.shadowRoot.querySelector("artiled-tile-card");
+  check("list: a lit tile carries its first stop for the icon",
+        lit.shadowRoot.querySelector(".tile.washed") !== null
+        && lit.shadowRoot.querySelector(".tile").style.getPropertyValue("--first") === "rgb(255,0,0)");
+
+  /* The strategy: one home card, the layout option passed only when valid. */
+  const Strategy = win.customElements.get("ll-strategy-dashboard-artiled-hub");
+  const reg = {
+    entities: [{ entity_id: "light.kitchen", platform: "artiled_hub", device_id: "d1", unique_id: "x_room_1" }],
+    devices: [{ id: "d1", name: "Kitchen", identifiers: [["artiled_hub", "SheCh6feegh9chu_room_1"]] }],
+  };
+  const shass = { ...hass, callWS: (m) => Promise.resolve(m.type === "config/entity_registry/list" ? reg.entities : reg.devices) };
+  const home_of = async (config) => {
+    const out = await Strategy.generate(config, shass);
+    const view = out.views.find((v) => v.path === "home");
+    return view && view.sections.flatMap((s) => s.cards).find((c) => c.type === "custom:artiled-home-card");
+  };
+  let h = await home_of({});
+  check("strategy: Home is ONE home card holding the Rooms group",
+        !!h && h.groups.length === 1 && h.groups[0].heading === "Rooms"
+        && h.groups[0].tiles[0].entity === "light.kitchen" && !("layout" in h));
+  h = await home_of({ layout: "square" });
+  check("strategy: `layout: square` is handed to the home card", !!h && h.layout === "square");
+  h = await home_of({ layout: "huge" });
+  check("strategy: an unknown layout is ignored (the switch shows)", !!h && !("layout" in h));
+  dom.window.close();
+}

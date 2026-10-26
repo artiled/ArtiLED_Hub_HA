@@ -15,6 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import slugify
 
 from .const import DOMAIN
+from .entity_ids import voice_scene_unique_id
 
 
 async def async_setup_entry(
@@ -78,9 +79,16 @@ class ArtiHubScopedScene(Scene):
     "Cinema" in the Cinema becomes "Cinema Cinema". The whole point of letting
     the name be assigned is that the user says it, so it is stored verbatim.
 
-    ⚠ Attached to the ROOM/ZONE device rather than the Hub, so it groups with
-    the scope it acts on - and so deleting that room on the Hub takes its scoped
-    scenes with it rather than leaving them pointing at nothing.
+    ⚠ ON NO DEVICE (Michel 2026-10-26, as the Control's voice activities).
+    Home Assistant 2026.10 names an entity that is on a device "<device> <name>"
+    even with has_entity_name False (helpers/entity_registry.py
+    async_get_legacy_friendly_name joins the DEVICE and ENTITY parts), and its
+    entity_id "<area> <device> <name>" (_async_generate_entity_id). On the
+    room device "Relax time" read "Kitchen Relax time". The spoken name IS the
+    whole name, so the scene stands alone: which scope + scene it runs is in its
+    unique_id (entity_ids.voice_scene_unique_id) and its attributes. Deleting
+    the room on the Hub no longer takes it with the device, so _prune_deleted
+    retires the voice scenes of a scope that is gone.
     """
 
     _attr_has_entity_name = False
@@ -92,12 +100,8 @@ class ArtiHubScopedScene(Scene):
         self._kind = target["kind"]          # "room" | "zone"
         self._item_id = int(target["id"])
         self._attr_name = target["name"]
-        self._attr_unique_id = (
-            f"{data['hub_ident']}_voice_scene_{self._kind}_{self._item_id}_"
-            f"{slugify(str(self._scene))}"
-        )
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{data['hub_ident']}_{self._kind}_{self._item_id}")},
+        self._attr_unique_id = voice_scene_unique_id(
+            data["hub_ident"], self._kind, self._item_id, slugify(str(self._scene))
         )
 
     @property

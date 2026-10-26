@@ -153,6 +153,120 @@ const STYLE = `
 @media (prefers-reduced-motion: reduce) {
   .sw, .sw::after { transition: none; }
 }
+
+/* ---- the webapp's layouts (Settings > Layout, app/js/layout.js) ----------
+   PORTED from app/app.css, rule for rule; only the selectors change
+   (.layout-grid .app-tile__text -> :host([layout="grid"]) .text). No layout
+   attribute = Rows, the card above, which is also what a room's or a light's
+   own card stays (the webapp's room screen, .app-rows). Square carries every
+   Grid rule, as html.layout-grid.layout-square does. The spacing between
+   cards and the columns are the list's (TILES_STYLE). */
+
+/* Grid - controller-grid.tsx: [icon | toggle] on top, the NAME ALONE in a
+   38-high box below; no status line, no slider. Inner box padded 6/10. */
+:host([layout="grid"]) .inner,
+:host([layout="square"]) .inner {
+  padding: 6px 10px;
+  justify-content: flex-start;
+}
+:host([layout="grid"]) .top,
+:host([layout="square"]) .top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  height: auto;
+}
+:host([layout="grid"]) .icon,
+:host([layout="square"]) .icon {
+  flex: 0 0 auto;
+  margin-right: 1px;
+}
+/* ControllerToggleButton: position absolute right -10, pinned to the top */
+:host([layout="grid"]) .sw,
+:host([layout="square"]) .sw {
+  margin-left: auto;
+  align-self: flex-start;
+  margin-right: -10px;
+}
+/* the markup order is icon, text, switch: the text is ordered LAST or its
+   100% basis pushes the switch onto a third line */
+:host([layout="grid"]) .text,
+:host([layout="square"]) .text {
+  order: 1;
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 38px;
+}
+:host([layout="grid"]) .status,
+:host([layout="grid"]) .slider,
+:host([layout="square"]) .status,
+:host([layout="square"]) .slider {
+  display: none;
+}
+:host([layout="grid"]) .name,
+:host([layout="square"]) .name {
+  font-size: 18px;            /* font_size.lg semi_bold */
+}
+/* A light's card has no icon: Grid keeps it the line the icon gives every
+   other card, so a light's name sits where a zone's does. */
+:host([layout="grid"][kind="light"]) .top::before,
+:host([layout="square"][kind="light"]) .top::before {
+  content: '';
+  height: 34px;
+}
+
+/* Square - the Grid card as a square the size of a Scenes/Modes image; its two
+   lines go to the top and the foot of the square. */
+:host([layout="square"]) .tile {
+  height: auto;
+  aspect-ratio: 1;
+}
+:host([layout="square"]) .top {
+  height: 100%;
+  align-content: space-between;
+}
+
+/* List - one slim line per room or zone: the Rows card's top line with no
+   card round it, no wash and no slider (the settings row: padding 8, radius 8,
+   the same press highlight). The divider between lines is the list's. */
+:host([layout="list"]) .tile {
+  height: auto;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  -webkit-tap-highlight-color: transparent;
+}
+:host([layout="list"]) .tile:active {
+  background: rgba(127, 127, 127, .15);
+  background: color-mix(in srgb, var(--primary-text-color, #fff) 10%, transparent);
+}
+:host([layout="list"]) .wash,
+:host([layout="list"]) .slider {
+  display: none;
+}
+:host([layout="list"]) .inner {
+  width: 100%;
+  height: auto;
+}
+/* No card, so no dark text for a white-lit card: the words sit on the page.
+   ⚠ HA's theme text colour, not the app's white (see ENTITY_STYLE): on HA's
+   light theme white words would be invisible. */
+:host([layout="list"]) .icon,
+:host([layout="list"]) .name,
+:host([layout="list"]) .status {
+  color: var(--primary-text-color, #fff);
+}
+/* The LED colour on the icon, only while on and coloured. ⚠ DEVIATION: the
+   webapp clips its gradient to the Font Awesome GLYPH (background-clip: text);
+   an HA icon is an SVG inside ha-icon's own shadow root, which that cannot
+   reach, so the icon takes the gradient's START colour (--first). */
+:host([layout="list"]) .tile.washed .icon {
+  color: var(--first);
+}
 `;
 
 class ArtiLedTileCard extends HTMLElement {
@@ -167,6 +281,9 @@ class ArtiLedTileCard extends HTMLElement {
       throw new Error("artiled-tile-card needs an entity");
     }
     this._config = config;
+    /* the layout CSS keys a light's card (no icon) off this */
+    if (config.kind) this.setAttribute("kind", config.kind);
+    else this.removeAttribute("kind");
     this._built = false;
     if (this.shadowRoot) this.shadowRoot.innerHTML = "";
   }
@@ -342,6 +459,10 @@ class ArtiLedTileCard extends HTMLElement {
 
     el.tile.style.color = font;
     el.wash.style.background = bg;
+    /* List has no card to wash: its icon takes the colour instead */
+    el.tile.classList.toggle("washed", !!bg);
+    if (stops.length) el.tile.style.setProperty("--first", stops[0]);
+    else el.tile.style.removeProperty("--first");
     el.name.textContent =
       c.name || state.attributes.friendly_name || c.entity;
     el.status.textContent = c.kind === "light" ? "ArtiLED" : tile_status(state);
@@ -390,6 +511,358 @@ class ArtiLedTileCard extends HTMLElement {
     if (document.activeElement !== node && node.value !== state.state) {
       node.value = state.state;
     }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Tile layouts - the webapp's Settings > Layout (Michel 2026-10-26).
+ * ------------------------------------------------------------------ */
+
+/* PORTED FROM app/js/layout.js: the same four words, the same default and the
+ * same localStorage key. Grid is the default ("Grid is the DEFAULT layout
+ * everywhere", Michel 2026-10-24); a word this version does not know is Grid,
+ * and 'compact' (Square's name for a day) reads as Square.
+ *
+ * Per BROWSER, as in the webapp: a phone and a wall tablet can reasonably want
+ * different layouts. The strategy option `layout:` fixes one for a dashboard
+ * instead (the switch is then not drawn).
+ *
+ * ⚠ localStorage can throw (private mode, blocked site data). The layout is a
+ * nicety, so a throw is the default rather than a broken dashboard. */
+const LAYOUTS = ["rows", "grid", "square", "list"];   /* the webapp's order */
+const LAYOUT_DEFAULT = "grid";
+const LAYOUT_KEY = "artiled_layout";
+const LAYOUT_EVENT = "artiled-layout";
+const LAYOUT_OLD_NAMES = { compact: "square" };
+const LAYOUT_LABEL = { rows: "Rows", grid: "Grid", square: "Square", list: "List" };
+
+function layout_word(value) {
+  if (typeof value === "string" && Object.prototype.hasOwnProperty.call(LAYOUT_OLD_NAMES, value)) {
+    value = LAYOUT_OLD_NAMES[value];
+  }
+  return LAYOUTS.includes(value) ? value : LAYOUT_DEFAULT;
+}
+
+/* A valid fixed (strategy) choice wins; otherwise this browser's. */
+/* The choice made on this page when storage refused it. */
+let layout_unsaved = null;
+
+function layout_read(fixed, win) {
+  if (fixed && LAYOUTS.includes(fixed)) return fixed;
+  try {
+    return layout_word((win || window).localStorage.getItem(LAYOUT_KEY));
+  } catch (e) {
+    return layout_word(layout_unsaved);
+  }
+}
+
+/* Stores the choice and tells every list on every view of this page. */
+function layout_store(value) {
+  const word = layout_word(value);
+  layout_unsaved = word;
+  try {
+    window.localStorage.setItem(LAYOUT_KEY, word);
+  } catch (e) {
+    /* nothing to do: the page still shows the choice until it is left */
+  }
+  window.dispatchEvent(new CustomEvent(LAYOUT_EVENT, { detail: word }));
+}
+
+/* How many cards share a row - app.css on a phone, tablet.css on an iPad.
+ *
+ *   phone              Rows 1   Grid 2   Square 2   List 1
+ *   tablet portrait    Rows 2   Grid 4   Square 4   List 2
+ *   tablet landscape   Rows 2   Grid 6   Square 6   List 2
+ *     ...under 1100 px wide: Grid 5 (at 6 "Living Room" was cut)
+ *
+ * ⚠ Keyed off the LIST's width, not the viewport's as tablet.css is: a
+ * dashboard sits beside HA's sidebar and inside its padding, so a viewport
+ * width says little about the room the tiles have. The webapp's thresholds
+ * are translated to the content width they leave: its tablet step (700) less
+ * the 2 x 24 gutter = 652; a landscape iPad 1024 wide less 2 x 40 = 944, and
+ * the 1100 cut-off = 1020. A wide card in portrait keeps the portrait counts,
+ * as tablet.css's orientation queries do. */
+function layout_columns(layout, width, landscape) {
+  const word = layout_word(layout);
+  const w = Number(width) || 0;
+  let tier = "phone";
+  if (w >= 652) tier = landscape && w >= 900 ? "landscape" : "portrait";
+  let cols;
+  if (tier === "phone") {
+    cols = word === "grid" || word === "square" ? 2 : 1;
+  } else if (word === "rows" || word === "list") {
+    cols = 2;
+  } else if (tier === "portrait") {
+    cols = 4;
+  } else {
+    cols = word === "grid" && w < 1020 ? 5 : 6;
+  }
+  return { cols, tier };
+}
+
+function is_landscape() {
+  try {
+    return !!(window.matchMedia && window.matchMedia("(orientation: landscape)").matches);
+  } catch (e) {
+    return true;
+  }
+}
+
+/* The LIST: .app-tiles from app.css and tablet.css. The cards are separate
+ * custom elements, so the spacing between them lives here, on the hosts. */
+const TILES_STYLE = `
+.app-tiles {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+}
+.app-tiles > artiled-tile-card {
+  position: relative;
+  margin-top: 15px;                 /* controller.tsx marginTop 15 */
+}
+/* Grid on a phone: two cells of 48.75%, 2.5% apart */
+.app-tiles[data-layout="grid"][data-tier="phone"] { column-gap: 2.5%; }
+/* tablet.css: --tablet-gap 15, landscape 24 (Rows, List)... */
+.app-tiles[data-tier="portrait"] { column-gap: 15px; }
+.app-tiles[data-tier="landscape"] { column-gap: 24px; }
+.app-tiles[data-tier="landscape"]:not([data-layout="square"]):not([data-layout="list"]) > artiled-tile-card {
+  margin-top: 24px;
+}
+/* ...but Grid's many across keep 15 between columns */
+.app-tiles[data-layout="grid"][data-tier="landscape"] { column-gap: 15px; }
+/* Square: each square W/n - 10.5, the Scenes/Modes image's size; 10.5 between
+   columns and rows, 5.25 at either edge */
+.app-tiles[data-layout="square"][data-tier] {
+  column-gap: 10.5px;
+  padding: 0 5.25px;
+}
+.app-tiles[data-layout="square"] > artiled-tile-card { margin-top: 10.5px; }
+/* List: lines 4 apart, the 1px rule at .3 between them, hanging 4px above */
+.app-tiles[data-layout="list"] > artiled-tile-card { margin: 4px 0; }
+.app-tiles[data-layout="list"] > artiled-tile-card + artiled-tile-card::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--primary-text-color, #fff);
+  opacity: .3;
+}
+/* two across: the divider runs between ROWS, so the first row's right-hand
+   line has none above it */
+.app-tiles[data-layout="list"]:not([data-tier="phone"]) > artiled-tile-card:nth-child(2)::before {
+  display: none;
+}
+`;
+
+/* Builds one list of tiles into `parent`. */
+function tiles_list(parent, configs, hass) {
+  const box = document.createElement("div");
+  box.className = "app-tiles";
+  configs.forEach((cfg) => {
+    const card = document.createElement("artiled-tile-card");
+    card.setConfig(cfg);
+    card.hass = hass;
+    box.appendChild(card);
+  });
+  parent.appendChild(box);
+  return box;
+}
+
+/* Puts a list into a layout at its current width. */
+function tiles_layout(box, layout) {
+  const { cols, tier } = layout_columns(layout, box.clientWidth, is_landscape());
+  box.dataset.layout = layout;
+  box.dataset.tier = tier;
+  box.style.setProperty("--cols", String(cols));
+  for (const card of box.children) {
+    if (card.getAttribute("layout") !== layout) card.setAttribute("layout", layout);
+  }
+}
+
+/* Keeps the lists in `root` in the layout: on a switch anywhere on the page,
+ * on a resize of the card, on a rotation. Returns the function that stops it. */
+function tiles_follow(host, root, fixed) {
+  const redo = () => {
+    const layout = layout_read(fixed);
+    root.querySelectorAll(".app-tiles").forEach((box) => tiles_layout(box, layout));
+    return layout;
+  };
+  const on_event = () => redo();
+  window.addEventListener(LAYOUT_EVENT, on_event);
+  let ro = null;
+  if (typeof ResizeObserver === "function") {
+    ro = new ResizeObserver(() => redo());
+    ro.observe(host);
+  }
+  let mq = null;
+  try {
+    mq = window.matchMedia ? window.matchMedia("(orientation: landscape)") : null;
+    if (mq && mq.addEventListener) mq.addEventListener("change", on_event);
+  } catch (e) {
+    mq = null;
+  }
+  return {
+    redo,
+    stop() {
+      window.removeEventListener(LAYOUT_EVENT, on_event);
+      if (ro) ro.disconnect();
+      if (mq && mq.removeEventListener) mq.removeEventListener("change", on_event);
+    },
+  };
+}
+
+/* The switch - the webapp's Settings > Layout choices (.tt-tile with the
+ * app's own phone-preview artwork, the chosen one framed), drawn small on the
+ * dashboard because HA has no Settings > Layout of ours to put it in. The
+ * artwork is settings/layout/index.php's, stroked in currentColor so it
+ * follows HA's theme instead of the app's white. */
+const LAYOUT_ART_FRAME =
+  '<rect x="0.5" y="0.5" width="87.7" height="158.9" rx="8.6" stroke="currentColor" stroke-opacity="0.8"/>' +
+  '<path d="M24 1.1H65.1V4.6C65.1 7.1 63.1 9.1 60.6 9.1H28.6C26 9.1 24 7.1 24 4.6V1.1Z" fill="currentColor" fill-opacity="0.85"/>' +
+  '<path d="M8 37.4H81.1" stroke="currentColor" stroke-opacity="0.7" stroke-width="0.5"/>';
+const art_rect = (x, y, w, h, rx) =>
+  `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="currentColor" fill-opacity="0.8"/>`;
+const LAYOUT_ART = {
+  rows: [43.4, 74.3, 105.1, 136].map((y) => art_rect(8, y, 73.1, 22.9, 4.6)).join(""),
+  grid: [43.4, 74.3, 105.1].map((y) => art_rect(8, y, 34.3, 22.9, 4.6) + art_rect(46.9, y, 34.3, 22.9, 4.6)).join(""),
+  square: [43.4, 82.3, 121.2].map((y) => art_rect(8, y, 34.3, 34.3, 4.6) + art_rect(46.9, y, 34.3, 34.3, 4.6)).join(""),
+  list: [0, 1, 2, 3, 4, 5, 6].map((i) => {
+    const y = 44 + i * 16;
+    return art_rect(8, y, 8, 8, 2) + art_rect(22, y + 1.5, 36, 5, 2.5) + art_rect(69, y + 0.5, 12.1, 7, 3.5) +
+      (i < 6 ? `<path d="M8 ${y + 12}H81.1" stroke="currentColor" stroke-opacity="0.7" stroke-width="0.5"/>` : "");
+  }).join(""),
+};
+
+/* app.css .tt-tiles / .tt-tile, at the size of a toolbar: the face 44 px
+   instead of a third of the phone, its radius 20 scaled with it. */
+const HOME_STYLE = `
+:host { display: block; }
+.layouts {
+  display: flex; justify-content: flex-end; gap: 10px;
+  margin: 4px 0 0;
+}
+.tt-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 0; border: 0; background: none; font: inherit; cursor: pointer;
+  color: var(--primary-text-color, #fff);
+  -webkit-tap-highlight-color: transparent;
+}
+.tt-tile__face {
+  width: 44px; aspect-ratio: 1; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(127, 127, 127, .45);
+  border: 1px solid color-mix(in srgb, var(--primary-text-color, #fff) 30%, transparent);
+  border-radius: 9px;
+  opacity: .72;
+}
+.tt-tile:active .tt-tile__face {
+  background: color-mix(in srgb, var(--primary-text-color, #fff) 10%, transparent);
+}
+.tt-tile.is-running .tt-tile__face {
+  opacity: 1;
+  background: rgba(127, 127, 127, .15);
+  background: color-mix(in srgb, var(--primary-text-color, #fff) 12%, transparent);
+  border-color: rgba(127, 127, 127, .9);
+  border-color: color-mix(in srgb, var(--primary-text-color, #fff) 80%, transparent);
+}
+.tt-tile__face svg { width: 46%; height: auto; }
+.tt-tile__name { font-size: 12px; line-height: 1.2; }
+/* app.css .app-section: the Rooms / Zones headings */
+.app-section {
+  margin: 18px 0 0; font-size: 16px; font-weight: 400;
+  color: var(--primary-text-color, #fff);
+}
+.layouts + .app-section { margin-top: 0; }
+${TILES_STYLE}
+`;
+
+/* Home - app/index.php: "Rooms" and its tiles, then "Zones" and its tiles,
+ * in the chosen layout, under the layout switch. ONE card, not a card per
+ * tile: HA's section grid cannot give a list the webapp's column counts and
+ * gaps, and a per-browser switch could not regenerate it. */
+class ArtiLedHomeCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._built = false;
+  }
+
+  setConfig(config) {
+    if (!config || !Array.isArray(config.groups)) {
+      throw new Error("artiled-home-card needs groups");
+    }
+    this._config = config;
+    this._built = false;
+    if (this._follow) this._follow.stop();
+    this._follow = null;
+    if (this.shadowRoot) this.shadowRoot.innerHTML = "";
+  }
+
+  getCardSize() { return 12; }
+
+  getGridOptions() { return { columns: "full" }; }
+
+  /* a valid strategy `layout:` fixes it; anything else leaves it to the switch */
+  _fixed() {
+    const l = this._config && this._config.layout;
+    return LAYOUTS.includes(l) ? l : null;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._built) this._build();
+    this.shadowRoot.querySelectorAll("artiled-tile-card").forEach((c) => { c.hass = hass; });
+  }
+
+  connectedCallback() {
+    if (this._built && !this._follow) this._start();
+  }
+
+  disconnectedCallback() {
+    if (this._follow) this._follow.stop();
+    this._follow = null;
+  }
+
+  _build() {
+    const root = this.shadowRoot;
+    const fixed = this._fixed();
+    const esc = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    root.innerHTML = `<style>${HOME_STYLE}</style>` + (fixed ? "" :
+      `<div class="layouts" role="radiogroup" aria-label="Layout">${LAYOUTS.map((l) => `
+        <button class="tt-tile" type="button" role="radio" data-layout="${l}" title="${LAYOUT_LABEL[l]}">
+          <span class="tt-tile__face"><svg viewBox="0 0 90 160" fill="none" aria-hidden="true">${LAYOUT_ART_FRAME}${LAYOUT_ART[l]}</svg></span>
+          <span class="tt-tile__name">${LAYOUT_LABEL[l]}</span>
+        </button>`).join("")}</div>`);
+    this._config.groups.forEach((g) => {
+      if (!g || !Array.isArray(g.tiles) || !g.tiles.length) return;
+      const h = document.createElement("h2");
+      h.className = "app-section";
+      h.innerHTML = esc(g.heading || "");
+      root.appendChild(h);
+      tiles_list(root, g.tiles, this._hass);
+    });
+    root.querySelectorAll(".tt-tile[data-layout]").forEach((b) =>
+      b.addEventListener("click", () => layout_store(b.dataset.layout))
+    );
+    this._built = true;
+    this._start();
+  }
+
+  _start() {
+    this._follow = tiles_follow(this, this.shadowRoot, this._fixed());
+    const paint = () => {
+      const layout = this._follow.redo();
+      this.shadowRoot.querySelectorAll(".tt-tile[data-layout]").forEach((b) => {
+        const on = b.dataset.layout === layout;
+        b.classList.toggle("is-running", on);
+        b.setAttribute("aria-checked", on ? "true" : "false");
+      });
+    };
+    const stop = this._follow.stop;
+    window.addEventListener(LAYOUT_EVENT, paint);
+    this._follow.stop = () => { stop(); window.removeEventListener(LAYOUT_EVENT, paint); };
+    paint();
   }
 }
 
@@ -468,7 +941,7 @@ const ENTITY_STYLE = `
   color: var(--primary-text-color, #fff);
   font-size: 14px; font-weight: 600; text-align: center;
 }
-.rows > * { margin-top: 15px; display: block; }
+${TILES_STYLE}
 .empty {
   color: var(--secondary-text-color, rgba(255,255,255,.5));
   font-size: 14px; padding: 24px 12px; text-align: center;
@@ -488,7 +961,21 @@ class ArtiLedEntityCard extends HTMLElement {
     this._config = config;
     this._built = false;
     this._tab = null;
+    if (this._follow) this._follow.stop();
+    this._follow = null;
     if (this.shadowRoot) this.shadowRoot.innerHTML = "";
+  }
+
+  connectedCallback() {
+    if (this._built && !this._follow && this.shadowRoot.querySelector(".app-tiles")) {
+      this._follow = tiles_follow(this, this.shadowRoot, this._config.layout);
+      this._follow.redo();
+    }
+  }
+
+  disconnectedCallback() {
+    if (this._follow) this._follow.stop();
+    this._follow = null;
   }
 
   getCardSize() { return 12; }
@@ -574,19 +1061,17 @@ class ArtiLedEntityCard extends HTMLElement {
       const ids = (which === "zones" ? this._config.zones : this._config.lights) || [];
       if (panel._sig === String(ids) && !force) return;
       panel._sig = String(ids);
-      panel.innerHTML = `<div class="rows"></div>`;
-      const rows = panel.querySelector(".rows");
       if (!ids.length) {
         panel.innerHTML = `<div class="empty">Nothing here.</div>`;
         return;
       }
-      ids.forEach((cfg) => {
-        const card = document.createElement("artiled-tile-card");
-        card.setConfig(typeof cfg === "string"
-          ? { entity: cfg, kind: which === "zones" ? "zone" : "light" } : cfg);
-        card.hass = this._hass;
-        rows.appendChild(card);
-      });
+      /* ⚠ Home's lists, in Home's layout (tablet.css: "Zones and Lights are
+         Home's .app-tiles"). The room's OWN card above the tabs stays Rows. */
+      panel.innerHTML = "";
+      tiles_list(panel, ids.map((cfg) => (typeof cfg === "string"
+        ? { entity: cfg, kind: which === "zones" ? "zone" : "light" } : cfg)), this._hass);
+      if (!this._follow) this._follow = tiles_follow(this, this.shadowRoot, this._config.layout);
+      this._follow.redo();
       return;
     }
     if (which === "colors") this._fill_colors(panel, state, force);
@@ -1241,6 +1726,23 @@ function voice_item_key(item) {
   return String(item === undefined || item === null ? "" : item).toLowerCase();
 }
 
+/* Aliases as the "also called" field shows them, and back (Michel 2026-10-26,
+   as the Control). ⚠ HA 2026.10 keeps the entity's OWN computed name IN its
+   aliases list - the websocket shows it as null, and a new entity starts with
+   just that entry. The field shows only the user's words; a save puts the null
+   back first. Saving without it took the entity's own name out of what Assist
+   answers to. An entry read without a null (older HA, or the user's own list)
+   is saved as typed; one never read keeps HA's default, the null. */
+function aliases_shown(raw) {
+  return (raw || []).filter((a) => typeof a === "string" && a.trim() !== "").join(", ");
+}
+
+function aliases_to_save(text, raw) {
+  const typed = String(text || "").split(",").map((a) => a.trim()).filter(Boolean);
+  const keep_computed = raw === undefined || raw === null || (raw || []).some((a) => a === null);
+  return keep_computed ? [null, ...typed] : typed;
+}
+
 const VOICE_DOMAINS = new Set([
   "light", "switch", "cover", "media_player", "climate", "fan", "lock", "scene",
 ]);
@@ -1365,16 +1867,28 @@ details > summary ha-icon {
 }
 `;
 
+/* What the person was doing on the Voice page (Michel 2026-10-26, as the
+   Control). Adding or renaming a voice scene/mode reloads the integration, the
+   strategy hands the card a NEW config (often a new card element), and the page
+   is drawn again: without this it jumped back to the first tab the moment + was
+   pressed, closed the room, and showed the old name until the reload finished.
+   Page state only, kept per browser tab. */
+const VOICE_UI = { tab: null, open: new Set(), typed: new Map() };
+const open_key = (kind, id, what) => `${kind}|${Number(id)}|${what}`;
+const typed_key = (kind, id, what, item) => `${kind}|${Number(id)}|${what}|${voice_item_key(item)}`;
+
 class ArtiLedVoiceCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
     this._built = false;
+    this._alias_raw = new Map();   /* entity_id -> its registry aliases as read */
   }
 
   setConfig(config) {
     this._config = config || {};
     this._built = false;
+    this._alias_raw = new Map();
   }
 
   getCardSize() { return 14; }
@@ -1473,7 +1987,11 @@ class ArtiLedVoiceCard extends HTMLElement {
       const suggest = scope.name.toLowerCase() === String(item).toLowerCase()
         ? `${scope.name} ${what === "mode" ? "Mode" : "Scene"}`
         : `${scope.name} ${item}`;
-      const shown = hit ? hit.name : suggest;
+      /* A name typed here wins until the reloaded config carries it. */
+      const k = typed_key(scope.kind, scope.id, what, item);
+      if (VOICE_UI.typed.has(k) && hit && hit.name === VOICE_UI.typed.get(k)) VOICE_UI.typed.delete(k);
+      const own = VOICE_UI.typed.has(k) ? VOICE_UI.typed.get(k) : (hit ? String(hit.name) : "");
+      const shown = own || suggest;
       return `
         <div class="opt" data-kind="${scope.kind}" data-id="${scope.id}"
              data-item="${String(item).replace(/"/g, "&quot;")}" data-what="${what}">
@@ -1482,10 +2000,14 @@ class ArtiLedVoiceCard extends HTMLElement {
           </button>
           <span class="opt__name">${item}</span>
           <input type="text" placeholder="${suggest}"
-                 value="${hit ? String(hit.name).replace(/"/g, "&quot;") : ""}">
+                 value="${own.replace(/"/g, "&quot;")}">
           <span class="opt__warn" title="">${
             this._name_taken(shown, hit && hit.entity) ? "⚠" : ""}</span>
-        </div>`;
+        </div>${hit && hit.entity ? `
+        <div class="aliases">
+          <input type="text" data-e="${String(hit.entity).replace(/"/g, "&quot;")}"
+                 placeholder="also called — comma separated">
+        </div>` : ""}`;
     }).join("");
   }
 
@@ -1551,7 +2073,8 @@ class ArtiLedVoiceCard extends HTMLElement {
       ["modes", "Modes", n_modes, "mode"],
     ].filter(([, , , what]) => this._scoped_panel(what));
 
-    this._tab = groups[0][0];
+    const tabs = groups.map(([k]) => k).concat(extra.map(([k]) => k));
+    this._tab = tabs.includes(VOICE_UI.tab) ? VOICE_UI.tab : groups[0][0];
     this.shadowRoot.innerHTML = `
       <style>${VOICE_STYLE}</style>
       <div class="wrap">
@@ -1587,23 +2110,54 @@ class ArtiLedVoiceCard extends HTMLElement {
     });
     /* Fill a scope's rows the first time it is opened — see _scoped_rows. */
     this.shadowRoot.querySelectorAll("details").forEach((d) => {
+      const key = open_key(d.dataset.kind, d.dataset.id, d.dataset.what);
       d.addEventListener("toggle", () => {
-        if (!d.open || d.dataset.filled) return;
-        d.dataset.filled = "1";
-        const scope = (this._config.scoped || []).find(
-          (s) => s.kind === d.dataset.kind && String(s.id) === d.dataset.id);
-        if (!scope) return;
-        const box = d.querySelector(".opts");
-        box.innerHTML = this._scoped_rows(scope, d.dataset.what);
-        box.querySelectorAll(".tick").forEach((b) =>
-          b.addEventListener("click", () => this._toggle_scoped(b)));
-        box.querySelectorAll("input").forEach((i) => {
-          i.addEventListener("change", () => this._rename_scoped(i));
-          /* Live, as they type — a clash is worth knowing BEFORE the tick. */
-          i.addEventListener("input", () => this._recheck_name(i));
-        });
+        if (d.open) VOICE_UI.open.add(key); else VOICE_UI.open.delete(key);
+        if (d.open) this._fill_scoped(d);
       });
+      /* A room left open before the reload opens again, filled now - not left
+         to a toggle event that may come later or not at all. */
+      if (VOICE_UI.open.has(key)) {
+        d.open = true;
+        this._fill_scoped(d);
+      }
     });
+  }
+
+  /* One scope's scene/mode rows, built the first time it is opened. */
+  _fill_scoped(d) {
+    if (d.dataset.filled) return;
+    const scope = (this._config.scoped || []).find(
+      (s) => s.kind === d.dataset.kind && String(s.id) === d.dataset.id);
+    if (!scope) return;
+    d.dataset.filled = "1";
+    const box = d.querySelector(".opts");
+    box.innerHTML = this._scoped_rows(scope, d.dataset.what);
+    box.querySelectorAll(".tick").forEach((b) =>
+      b.addEventListener("click", () => this._toggle_scoped(b)));
+    box.querySelectorAll(".opt input").forEach((i) => {
+      i.addEventListener("change", () => this._rename_scoped(i));
+      /* Live, as they type — a clash is worth knowing BEFORE the tick. */
+      i.addEventListener("input", () => this._recheck_name(i));
+    });
+    /* An added scene's (or mode's) aliases - the Rooms tab's "also called"
+       field, read from and saved to its registry entry (Michel 2026-10-26, as
+       the Control's Activities tab). */
+    box.querySelectorAll(".aliases input").forEach((i) => {
+      i.addEventListener("change", () => this._save_aliases(i));
+      i.addEventListener("blur", () => this._save_aliases(i));
+      this._load_aliases(i);
+    });
+  }
+
+  async _load_aliases(input) {
+    try {
+      const entry = await this._hass.callWS({
+        type: "config/entity_registry/get", entity_id: input.dataset.e,
+      });
+      this._alias_raw.set(input.dataset.e, (entry || {}).aliases || []);
+      if (document.activeElement !== input) input.value = aliases_shown((entry || {}).aliases);
+    } catch (e) { /* the field stays empty; nothing is written unless typed */ }
   }
 
   /* Add or remove one scoped scene/mode. The integration persists the choice
@@ -1616,6 +2170,9 @@ class ArtiLedVoiceCard extends HTMLElement {
     const data = { [row.dataset.kind]: Number(row.dataset.id) };
     data[what] = row.dataset.item;
     if (on) data.name = (input.value || input.placeholder).trim();
+    const k = typed_key(row.dataset.kind, row.dataset.id, what, row.dataset.item);
+    if (on && input.value.trim()) VOICE_UI.typed.set(k, input.value.trim());
+    if (!on) VOICE_UI.typed.delete(k);
     btn.classList.toggle("on", on);
     btn.querySelector("ha-icon").setAttribute("icon", on ? "mdi:check" : "mdi:plus");
     try {
@@ -1624,6 +2181,7 @@ class ArtiLedVoiceCard extends HTMLElement {
     } catch (e) {
       btn.classList.toggle("on", !on);   /* put it back; the write failed */
       btn.querySelector("ha-icon").setAttribute("icon", !on ? "mdi:check" : "mdi:plus");
+      VOICE_UI.typed.delete(k);          /* nothing was stored, nothing to hold */
     }
   }
 
@@ -1649,13 +2207,18 @@ class ArtiLedVoiceCard extends HTMLElement {
     const data = { [row.dataset.kind]: Number(row.dataset.id),
                    name: (input.value || input.placeholder).trim() };
     data[what] = row.dataset.item;
+    const k = typed_key(row.dataset.kind, row.dataset.id, what, row.dataset.item);
+    VOICE_UI.typed.set(k, data.name);
     try {
       await this._hass.callService("artiled_hub", `add_voice_${what}`, data);
-    } catch (e) { /* leave the field as typed so the user can retry */ }
+    } catch (e) {
+      VOICE_UI.typed.delete(k);   /* refused: the stored name stands; the field keeps what was typed, to retry */
+    }
   }
 
   _select(which) {
     this._tab = which;
+    VOICE_UI.tab = which;
     this.shadowRoot.querySelectorAll(".tab").forEach((t) =>
       t.classList.toggle("on", t.dataset.t === which));
     this.shadowRoot.querySelectorAll(".panel").forEach((p) =>
@@ -1696,13 +2259,15 @@ class ArtiLedVoiceCard extends HTMLElement {
         if (pill) pill.classList.toggle("on", !!on);
       });
       const input = this.shadowRoot.querySelector(`input[data-e="${id}"]`);
-      /* ⚠ HA stores a stray null in aliases on some entries (this Hub's do) —
-         filter, or the field renders "null" and saving it back keeps it.
+      /* ⚠ The null in aliases is NOT stray: it is HA 2026.10's computed own
+         name. Not shown (the field would render "null"), and put back on save
+         (aliases_to_save) - dropping it took the entity's own name away.
          ⚠ An empty field keeps its PLACEHOLDER, which carries the suggested
          "<Name> Lights". A placeholder is not a value: nothing is written until
          the user types and the row saves, so this never edits customer data on
          its own. */
-      if (input) input.value = ((entry || {}).aliases || []).filter(Boolean).join(", ");
+      this._alias_raw.set(id, (entry || {}).aliases || []);
+      if (input) input.value = aliases_shown((entry || {}).aliases);
     }));
   }
 
@@ -1722,8 +2287,7 @@ class ArtiLedVoiceCard extends HTMLElement {
   }
 
   async _save_aliases(input) {
-    const aliases = String(input.value || "")
-      .split(",").map((a) => a.trim()).filter(Boolean);
+    const aliases = aliases_to_save(input.value, this._alias_raw.get(input.dataset.e));
     const key = input.dataset.e + "|" + aliases.join("|");
     if (this._saved === key) return;   /* change AND blur both fire */
     this._saved = key;
@@ -1923,42 +2487,40 @@ class ArtiLedDashboardStrategy {
            <h2 class="app-section">Zones</h2>  ...tiles...
        Not two tabs.
 
-       Each group is a FULL-WIDTH section (column_span = max_columns) so the two
-       stack vertically instead of sitting side by side. A spanned section's
-       grid is span x 12 columns, so grid_options.columns = 12 gives one tile
-       per view-column on a desktop and a full-width tile on a phone — the
-       app's single-column list. */
-    const home_sections = [];
+       ⚠ ONE card holding both lists (artiled-home-card), full width, since
+       0.32.5: the webapp's layouts (Grid by default, Square, List, Rows) put
+       2..6 tiles in a row by the width they have, with the webapp's own gaps,
+       and a per-browser switch changes them live. A card per tile in HA's
+       section grid could do neither. `layout: grid|square|list|rows` in the
+       strategy config fixes the layout for this dashboard (no switch). */
+    const LAYOUT_FIXED = config && LAYOUTS.includes(config.layout) ? config.layout : null;
+    const groups = [];
     for (const [entries, heading] of [
       [rooms, "Rooms"],
       [zones, "Zones"],
     ]) {
-      const cards = entries
-        .map((e) => {
-          const tile = scope_tile(e, {
-            navigate: `/${DASHBOARD_PATH}/${sub_path(e)}`,
-          });
-          return tile && { ...tile, grid_options: { columns: 12 } };
-        })
+      const tiles = entries
+        .map((e) => scope_tile(e, { navigate: `/${DASHBOARD_PATH}/${sub_path(e)}` }))
         .filter(Boolean);
-      if (!cards.length) continue;
-      home_sections.push({
-        type: "grid",
-        column_span: OVERVIEW_COLUMNS,
-        cards: [
-          { type: "heading", heading, heading_style: "subtitle" },
-          ...cards,
-        ],
-      });
+      if (tiles.length) groups.push({ heading, tiles });
     }
-    if (home_sections.length) {
+    if (groups.length) {
       views.push({
         title: "Home",
         path: "home",
         icon: "mdi:home",
         type: "sections",
         max_columns: OVERVIEW_COLUMNS,
-        sections: home_sections,
+        sections: [{
+          type: "grid",
+          column_span: OVERVIEW_COLUMNS,
+          cards: [{
+            type: "custom:artiled-home-card",
+            groups,
+            ...(LAYOUT_FIXED ? { layout: LAYOUT_FIXED } : {}),
+            grid_options: { columns: "full" },
+          }],
+        }],
       });
     }
 
@@ -1981,6 +2543,7 @@ class ArtiLedDashboardStrategy {
       const cards = [tile, {
         type: "custom:artiled-entity-card",
         entity: tile.entity,
+        ...(LAYOUT_FIXED ? { layout: LAYOUT_FIXED } : {}),
         scope: { [entry.kind]: entry.id },
         origin: HUB_ORIGIN(),
         stop_image: `${HUB_ORIGIN()}/images/control/stop.png`,
@@ -2288,6 +2851,7 @@ function define_once(registry, tag, ctor) {
 function define_all(registry) {
   define_once(registry, "artiled-tile-card", ArtiLedTileCard);
   define_once(registry, "artiled-entity-card", ArtiLedEntityCard);
+  define_once(registry, "artiled-home-card", ArtiLedHomeCard);
   define_once(registry, "artiled-colors-card", ArtiLedColorsCard);
   define_once(registry, "artiled-voice-card", ArtiLedVoiceCard);
   define_once(registry, "ll-strategy-dashboard-artiled-hub", ArtiLedDashboardStrategy);

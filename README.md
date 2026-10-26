@@ -62,6 +62,24 @@ not to invite forks. See Copyright below.
   automation already referencing one keeps working. Existing installs get a
   one-time hide that never re-hides anything you choose to show.
 - **Flows** — button entities; press starts the flow.
+- **Voice scenes and modes per room/zone** (Voice page, *Scenes* and *Modes*
+  tabs) — since 0.32.2:
+  - Its name is **exactly the spoken name** ("Relax time",
+    `scene.relax_time`): it belongs to no device, because Home Assistant would
+    put the room's name in front of it.
+  - **Heard as soon as you add it** (since 0.32.4): adding one is the request,
+    so it is exposed to Assist and to every cloud assistant switched on in Home
+    Assistant (Alexa, Google), whatever the room/zone itself is exposed to.
+    Once: change it afterwards and your choice stands. Voice scenes and modes
+    an earlier version left exposed to nothing are made heard once on update.
+  - Removed, it is un-exposed and deleted, and leaves nothing behind: added
+    again, it comes back clean under its spoken name.
+  - Its **aliases** are shown and edited under it ("also called"), as on the
+    Rooms tab. Saving aliases keeps the entity's own name among the names Assist
+    answers to.
+  - Adding or renaming one reloads the integration; since 0.32.3 the Voice
+    page keeps its tab, the open room/zone and the name you typed through that
+    reload.
 - **Services** — scoped scene/mode control for automations:
   `artiled_hub.run_scene`, `artiled_hub.stop_scene`, `artiled_hub.run_mode`,
   `artiled_hub.stop_mode` — each takes `name` plus optional `room` or `zone`.
@@ -101,6 +119,12 @@ not to invite forks. See Copyright below.
     Tapping one opens **that scope's own page** (an HA subview, with a back
     arrow) carrying its Scene and Mode pickers and the lights that belong to it.
     The overview is not an endless scroll of every light in the house.
+  - **Layouts** (since 0.32.5): the webapp's **Grid** (the default), **Square**,
+    **List** and **Rows**, switched at the top of Home and remembered per
+    browser, so a phone and a wall tablet can differ. Grid puts 2 tiles in a
+    row on a phone, 4 to 6 on a tablet or desktop; a room's Zones and Lights
+    tabs follow the same choice. `layout: grid` (or `square`, `list`, `rows`)
+    under `strategy:` fixes it for the whole dashboard and hides the switch.
   - ⚠ A scope's lights come from the `member_light_ids` attribute on its light
     entity, **not** from `via_device`. A device has exactly one parent and a
     light's is its *room*, so via_device can say "this light is in the Kitchen"

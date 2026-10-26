@@ -26,3 +26,21 @@ def parse_run_picker(unique_id: str, hub_ident: str) -> tuple[str, int, str] | N
     if not marker or suffix not in RUN_SUFFIXES or not item_id.isdigit():
         return None
     return kind, int(item_id), suffix
+
+
+def voice_scene_unique_id(hub_ident: str, kind: str, item_id: int, scene_slug: str) -> str:
+    """"<ident>_voice_scene_room_15_cinema" - the one key of a voice scene.
+
+    ⚠ The scene name goes in SLUGIFIED (the caller passes HA's slugify of it),
+    so "Relax" and "relax" are one scene, as everywhere else. scene.py builds
+    its unique_id here, and __init__.py finds the registry entry of a choice
+    here, so the two can never drift apart. A voice scene is on NO device
+    (see ArtiHubScopedScene), so this is how it is found, never by device.
+    """
+    return f"{hub_ident}_voice_scene_{kind}_{int(item_id)}_{scene_slug}"
+
+
+def voice_mode_unique_id(hub_ident: str, kind: str, item_id: int, mode_slug: str) -> str:
+    """"<ident>_voice_mode_room_15_music" - the one key of a voice mode switch.
+    Same rules as voice_scene_unique_id: slugified name, on NO device."""
+    return f"{hub_ident}_voice_mode_{kind}_{int(item_id)}_{mode_slug}"

@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import slugify
 
 from .const import DOMAIN
+from .entity_ids import voice_mode_unique_id
 
 
 async def async_setup_entry(
@@ -90,6 +91,11 @@ class ArtiHubScopedMode(CoordinatorEntity, SwitchEntity):
     ⚠ Opt-in and verbatim-named, for the same reasons as ArtiHubScopedScene:
     modes are fewer than scenes (~3-7 per scope) but the same flood argument
     applies, and "Cinema" in the Cinema must not become "Cinema Cinema".
+
+    ⚠ ON NO DEVICE, exactly as ArtiHubScopedScene (Michel 2026-10-26): on the
+    room device HA 2026.10 names it "<device> <name>" even with has_entity_name
+    False. Found by unique_id (entity_ids.voice_mode_unique_id) and its
+    attributes; _prune_deleted retires those of a scope that is gone.
     """
 
     _attr_has_entity_name = False
@@ -102,12 +108,8 @@ class ArtiHubScopedMode(CoordinatorEntity, SwitchEntity):
         self._kind = target["kind"]          # "room" | "zone"
         self._item_id = int(target["id"])
         self._attr_name = target["name"]
-        self._attr_unique_id = (
-            f"{data['hub_ident']}_voice_mode_{self._kind}_{self._item_id}_"
-            f"{slugify(self._mode)}"
-        )
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{data['hub_ident']}_{self._kind}_{self._item_id}")},
+        self._attr_unique_id = voice_mode_unique_id(
+            data["hub_ident"], self._kind, self._item_id, slugify(self._mode)
         )
 
     @property

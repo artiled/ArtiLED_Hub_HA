@@ -246,9 +246,17 @@ check("the user's name is used verbatim",
 check("activation carries the SCOPE",
       "{self._kind: self._item_id}" in SC,
       "a bare scene id fires across every light in the house")
-check("the scoped scene hangs off the room/zone device",
-      'f"{data[\'hub_ident\']}_{self._kind}_{self._item_id}"' in SC,
-      "so deleting the room takes its scoped scenes with it")
+_SCOPED_SC = SC.split("class ArtiHubScopedScene(")[1]
+check("the scoped scene is on NO device (HA 2026.10 would prefix the room's name)",
+      "_attr_device_info" not in _SCOPED_SC,
+      "on the room device 'Relax time' reads 'Kitchen Relax time' - see test_voice_entities.py")
+check("a deleted room's voice scenes/modes are retired by _prune_deleted instead",
+      "await _retire_voice(hass, entry_data, what, orphaned)" in IN)
+_SW = (pathlib.Path(__file__).resolve().parent.parent / "custom_components"
+       / "artiled_hub" / "switch.py").read_text()
+check("the scoped mode switch is on NO device either",
+      "_attr_device_info" not in _SW.split("class ArtiHubScopedMode(")[1],
+      "see test_voice_entities.py modes()")
 
 check("add/remove services exist",
       'DOMAIN, "add_voice_scene"' in IN and 'DOMAIN, "remove_voice_scene"' in IN)
